@@ -44,7 +44,8 @@ npm run typecheck
 Dos caminos, ambos gratis:
 
 1. **GitHub Actions (recomendado):** corre solo en cada PR que toque `app/`, o a mano en la pestaña *Actions* →
-   *APK de prueba* → *Run workflow*. Tarda ~15 min y deja
+   *APK de prueba* → *Run workflow*. El último build queda siempre en el link fijo
+   <https://github.com/Dratoc/CheckHome/releases/download/apk-prueba/checkhome.apk> (sin zip ni sesión). Tarda ~10 min y deja
    `app-release.apk` como artefacto del run. El repo es público, así que los minutos no se cobran. Ver
    `.github/workflows/apk-prueba.yml`.
 2. **EAS Build, plan gratuito:** con una cuenta de Expo propia (gratis, sin tarjeta):
