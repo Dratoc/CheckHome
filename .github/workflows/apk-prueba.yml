@@ -1,12 +1,17 @@
 # Genera un APK de prueba de CheckHome en un runner de GitHub.
 # Costo cero: el repo es público, y en repos públicos los runners estándar de GitHub Actions son gratis.
-# Se ejecuta solo a mano (pestaña Actions → "APK de prueba" → Run workflow) para no gastar minutos por cada push.
+# Corre en cada PR que toque app/ (así cada cambio trae su APK para probar) y también a mano
+# (pestaña Actions → "APK de prueba" → Run workflow).
 # El APK queda como artefacto del run por 14 días. Está firmado con la clave de depuración: sirve para
 # instalar y probar, no para publicar en la Play Store.
 name: APK de prueba
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - 'app/**'
+      - '.github/workflows/apk-prueba.yml'
 
 permissions:
   contents: read

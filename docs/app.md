@@ -43,7 +43,8 @@ npm run typecheck
 
 Dos caminos, ambos gratis:
 
-1. **GitHub Actions (recomendado):** pestaña *Actions* → *APK de prueba* → *Run workflow*. Tarda ~15 min y deja
+1. **GitHub Actions (recomendado):** corre solo en cada PR que toque `app/`, o a mano en la pestaña *Actions* →
+   *APK de prueba* → *Run workflow*. Tarda ~15 min y deja
    `app-release.apk` como artefacto del run. El repo es público, así que los minutos no se cobran. Ver
    `.github/workflows/apk-prueba.yml`.
 2. **EAS Build, plan gratuito:** con una cuenta de Expo propia (gratis, sin tarjeta):
