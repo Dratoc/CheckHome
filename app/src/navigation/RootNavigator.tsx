@@ -15,6 +15,9 @@ import { AddIncomeScreen } from '../screens/forms/AddIncomeScreen';
 import { AddIncomeSourceScreen } from '../screens/forms/AddIncomeSourceScreen';
 import { AddObligationScreen } from '../screens/forms/AddObligationScreen';
 import { AddRoutineScreen } from '../screens/forms/AddRoutineScreen';
+import { EditIncomeScreen } from '../screens/forms/EditIncomeScreen';
+import { EditTaskScreen } from '../screens/forms/EditTaskScreen';
+import { ObligationDetailScreen } from '../screens/ObligationDetailScreen';
 import { MainTabs } from './MainTabs';
 import type { RootStackParamList } from './types';
 
@@ -76,11 +79,14 @@ export function RootNavigator() {
         ) : (
           <Stack.Group>
             <Stack.Screen name="Main" component={MainTabs} options={{ headerShown: false }} />
-            <Stack.Screen name="AddExpense" component={AddExpenseScreen} options={{ title: 'Nuevo gasto', presentation: 'modal' }} />
-            <Stack.Screen name="AddObligation" component={AddObligationScreen} options={{ title: 'Nueva cuenta', presentation: 'modal' }} />
-            <Stack.Screen name="AddIncomeSource" component={AddIncomeSourceScreen} options={{ title: 'Nueva fuente de ingreso', presentation: 'modal' }} />
+            <Stack.Screen name="AddExpense" component={AddExpenseScreen} options={({ route }) => ({ title: route.params?.expenseId ? 'Editar gasto' : 'Nuevo gasto', presentation: 'modal' })} />
+            <Stack.Screen name="AddObligation" component={AddObligationScreen} options={({ route }) => ({ title: route.params?.obligationId ? 'Editar cuenta' : 'Nueva cuenta', presentation: 'modal' })} />
+            <Stack.Screen name="ObligationDetail" component={ObligationDetailScreen} options={({ route }) => ({ title: route.params.name })} />
+            <Stack.Screen name="AddIncomeSource" component={AddIncomeSourceScreen} options={({ route }) => ({ title: route.params?.source ? 'Editar fuente' : 'Nueva fuente de ingreso', presentation: 'modal' })} />
             <Stack.Screen name="AddIncome" component={AddIncomeScreen} options={{ title: 'Anotar ingreso', presentation: 'modal' }} />
-            <Stack.Screen name="AddRoutine" component={AddRoutineScreen} options={{ title: 'Nueva rutina', presentation: 'modal' }} />
+            <Stack.Screen name="EditIncome" component={EditIncomeScreen} options={{ title: 'Editar ingreso', presentation: 'modal' }} />
+            <Stack.Screen name="AddRoutine" component={AddRoutineScreen} options={({ route }) => ({ title: route.params?.routine ? 'Editar rutina' : 'Nueva rutina', presentation: 'modal' })} />
+            <Stack.Screen name="EditTask" component={EditTaskScreen} options={{ title: 'Editar tarea', presentation: 'modal' }} />
             <Stack.Screen name="DesignPreview" component={DesignPreview} options={{ title: 'Sistema de diseño' }} />
           </Stack.Group>
         )}

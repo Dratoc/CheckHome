@@ -2,13 +2,16 @@ import type {
   BacklogTaskView,
   Category,
   Expense,
+  ExpenseView,
   Frequency,
   IncomeSource,
+  IncomeView,
   Member,
   MonthSummary,
   Movement,
   MyHousehold,
   ObligationKind,
+  ObligationPayment,
   ObligationView,
   RankingRow,
   Routine,
@@ -86,6 +89,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 const get = <T>(path: string) => request<T>('GET', path);
 const post = <T = void>(path: string, body: unknown = {}) => request<T>('POST', path, body);
+const patch = <T = void>(path: string, body: unknown) => request<T>('PATCH', path, body);
+/** Borra y resuelve true, para que useMutation distinga éxito (true) de error (undefined). */
+const del = (path: string) => request<void>('DELETE', path).then(() => true as const);
 
 /** Normaliza lo que escribe la persona: sin espacios ni guiones, en mayúscula. */
 export function normalizeInviteCode(raw: string) {
@@ -158,6 +164,28 @@ export function createObligation(householdId: number, input: ObligationInput): P
   return post(`/households/${householdId}/obligations`, input);
 }
 
+export function getObligation(obligationId: number): Promise<ObligationView> {
+  return get(`/obligations/${obligationId}`);
+}
+
+export function updateObligation(obligationId: number, input: ObligationInput): Promise<ObligationView> {
+  return patch(`/obligations/${obligationId}`, input);
+}
+
+/** Borra la cuenta y todo su historial de pagos. */
+export function deleteObligation(obligationId: number) {
+  return del(`/obligations/${obligationId}`);
+}
+
+export function listObligationPayments(obligationId: number): Promise<ObligationPayment[]> {
+  return get(`/obligations/${obligationId}/payments`);
+}
+
+/** Deshace el último "Marcar pagado": el vencimiento vuelve un período atrás. */
+export function undoObligationPayment(paymentId: number) {
+  return del(`/obligation-payments/${paymentId}`);
+}
+
 export function payObligation(obligationId: number, _userId?: number): Promise<void> {
   return post(`/obligations/${obligationId}/pay`);
 }
@@ -181,6 +209,27 @@ export function addIncome(sourceId: number, amount: number, receivedOn?: string)
   return post(`/income-sources/${sourceId}/incomes`, { amount, receivedOn });
 }
 
+export function updateIncomeSource(sourceId: number, input: IncomeSourceInput): Promise<IncomeSource> {
+  return patch(`/income-sources/${sourceId}`, input);
+}
+
+/** Borra la fuente y todos los pagos anotados en ella. */
+export function deleteIncomeSource(sourceId: number) {
+  return del(`/income-sources/${sourceId}`);
+}
+
+export function getIncome(incomeId: number): Promise<IncomeView> {
+  return get(`/incomes/${incomeId}`);
+}
+
+export function updateIncome(incomeId: number, amount: number, receivedOn: string): Promise<IncomeView> {
+  return patch(`/incomes/${incomeId}`, { amount, receivedOn });
+}
+
+export function deleteIncome(incomeId: number) {
+  return del(`/incomes/${incomeId}`);
+}
+
 export function listExpenseCategories(householdId: number): Promise<Category[]> {
   return get(`/households/${householdId}/categories?kind=expense`);
 }
@@ -189,6 +238,18 @@ export type ExpenseInput = { amount: number; categoryId: number; description: st
 
 export function addExpense(householdId: number, _userId: number, input: ExpenseInput): Promise<Expense> {
   return post(`/households/${householdId}/expenses`, input);
+}
+
+export function getExpense(expenseId: number): Promise<ExpenseView> {
+  return get(`/expenses/${expenseId}`);
+}
+
+export function updateExpense(expenseId: number, input: ExpenseInput & { spentOn: string }): Promise<ExpenseView> {
+  return patch(`/expenses/${expenseId}`, input);
+}
+
+export function deleteExpense(expenseId: number) {
+  return del(`/expenses/${expenseId}`);
 }
 
 // ---------- Tareas ----------
@@ -203,6 +264,14 @@ export type RoutineInput = { name: string; frequency: Frequency; points: number 
 
 export function createRoutine(householdId: number, input: RoutineInput): Promise<Routine> {
   return post(`/households/${householdId}/routines`, input);
+}
+
+export function updateRoutine(routineId: number, input: RoutineInput): Promise<Routine> {
+  return patch(`/routines/${routineId}`, input);
+}
+
+export function deleteRoutine(routineId: number) {
+  return del(`/routines/${routineId}`);
 }
 
 export function toggleRoutine(routineId: number, _userId?: number): Promise<void> {
@@ -230,6 +299,14 @@ export function takeTask(taskId: number, _userId?: number): Promise<void> {
 
 export function completeTask(taskId: number, _userId?: number): Promise<void> {
   return post(`/backlog/${taskId}/complete`);
+}
+
+export function renameTask(taskId: number, title: string) {
+  return patch(`/backlog/${taskId}`, { title }).then(() => true as const);
+}
+
+export function deleteTask(taskId: number) {
+  return del(`/backlog/${taskId}`);
 }
 
 /** Puntos de la semana: rutinas marcadas + tareas del backlog terminadas. */

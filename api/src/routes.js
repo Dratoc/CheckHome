@@ -291,35 +291,111 @@ router.get(
   }),
 );
 
+function obligationInput(b) {
+  if (!OBLIGATION_KINDS.includes(b.kind)) throw badRequest('El tipo de cuenta no es válido.');
+  const currency = b.currency === 'UF' ? 'UF' : 'CLP';
+  const total = b.installmentsTotal == null || b.installmentsTotal === '' ? null : num(b.installmentsTotal, 'El total de cuotas', { min: 1, max: 1000, int: true });
+  const paid = total == null ? null : num(b.installmentsPaid ?? 0, 'Las cuotas pagadas', { min: 0, max: total, int: true });
+  return {
+    k: b.kind,
+    n: str(b.name, 'el nombre', { max: 100 }),
+    c: currency,
+    a: num(b.amount, 'El monto', { min: 0.0001 }),
+    d: date(isoDate(b.nextDueOn, 'El vencimiento')),
+    e: num(b.everyMonths ?? 1, 'La frecuencia', { min: 1, max: 24, int: true }),
+    acc: b.accountNumber ? str(b.accountNumber, 'el número de cuenta', { max: 50 }) : null,
+    it: total,
+    ip: paid,
+  };
+}
+
+async function obligationOf(req) {
+  const oid = idParam(req);
+  const [o] = await query('SELECT * FROM dbo.obligations WHERE id = @o', { o: oid });
+  if (!o) throw notFound('No encontramos esa cuenta.');
+  await requireMember(o.household_id, req.userId);
+  return o;
+}
+
+async function obligationWithUf(row) {
+  const uf = currencyOf(row) === 'UF' ? (await getUf())?.value : undefined;
+  return obligationView(row, uf);
+}
+
 router.post(
   '/households/:id/obligations',
   h(async (req, res) => {
     const hid = idParam(req);
     await requireMember(hid, req.userId);
-    const b = req.body;
-    if (!OBLIGATION_KINDS.includes(b.kind)) throw badRequest('El tipo de cuenta no es válido.');
-    const currency = b.currency === 'UF' ? 'UF' : 'CLP';
-    const total = b.installmentsTotal == null || b.installmentsTotal === '' ? null : num(b.installmentsTotal, 'El total de cuotas', { min: 1, max: 1000, int: true });
-    const paid = total == null ? null : num(b.installmentsPaid ?? 0, 'Las cuotas pagadas', { min: 0, max: total, int: true });
     const [row] = await query(
       `INSERT INTO dbo.obligations (household_id, kind, name, currency, amount, next_due_on, every_months, account_number, installments_total, installments_paid)
        OUTPUT INSERTED.*
        VALUES (@h, @k, @n, @c, @a, @d, @e, @acc, @it, @ip)`,
-      {
-        h: hid,
-        k: b.kind,
-        n: str(b.name, 'el nombre', { max: 100 }),
-        c: currency,
-        a: num(b.amount, 'El monto', { min: 0.0001 }),
-        d: date(isoDate(b.nextDueOn, 'El vencimiento')),
-        e: num(b.everyMonths ?? 1, 'La frecuencia', { min: 1, max: 24, int: true }),
-        acc: b.accountNumber ? str(b.accountNumber, 'el número de cuenta', { max: 50 }) : null,
-        it: total,
-        ip: paid,
-      },
+      { h: hid, ...obligationInput(req.body) },
     );
-    const uf = currency === 'UF' ? (await getUf())?.value : undefined;
-    res.status(201).json(obligationView(row, uf));
+    res.status(201).json(await obligationWithUf(row));
+  }),
+);
+
+router.get(
+  '/obligations/:id',
+  h(async (req, res) => {
+    res.json(await obligationWithUf(await obligationOf(req)));
+  }),
+);
+
+router.patch(
+  '/obligations/:id',
+  h(async (req, res) => {
+    const o = await obligationOf(req);
+    const [row] = await query(
+      `UPDATE dbo.obligations
+          SET kind = @k, name = @n, currency = @c, amount = @a, next_due_on = @d, every_months = @e, account_number = @acc,
+              installments_total = @it, installments_paid = @ip, updated_at = SYSUTCDATETIME()
+       OUTPUT INSERTED.*
+        WHERE id = @o`,
+      { o: o.id, ...obligationInput(req.body) },
+    );
+    res.json(await obligationWithUf(row));
+  }),
+);
+
+/** Borra la cuenta junto con su historial de pagos. */
+router.delete(
+  '/obligations/:id',
+  h(async (req, res) => {
+    const o = await obligationOf(req);
+    await transaction(async (tx) => {
+      await query('DELETE FROM dbo.obligation_payments WHERE obligation_id = @o', { o: o.id }, tx);
+      await query('DELETE FROM dbo.obligations WHERE id = @o', { o: o.id }, tx);
+    });
+    res.status(204).end();
+  }),
+);
+
+/** Historial de pagos de una cuenta, del más reciente al más antiguo. */
+router.get(
+  '/obligations/:id/payments',
+  h(async (req, res) => {
+    const o = await obligationOf(req);
+    const rows = await query(
+      `SELECT p.id, p.obligation_id, p.user_id, p.amount_clp, p.uf_value, p.paid_on, u.display_name
+         FROM dbo.obligation_payments p JOIN dbo.users u ON u.id = p.user_id
+        WHERE p.obligation_id = @o ORDER BY p.paid_on DESC, p.id DESC`,
+      { o: o.id },
+    );
+    res.json(
+      rows.map((r, i) => ({
+        id: r.id,
+        obligationId: r.obligation_id,
+        userId: r.user_id,
+        paidBy: r.display_name,
+        amountClp: Number(r.amount_clp),
+        ufValue: r.uf_value == null ? undefined : Number(r.uf_value),
+        paidOn: fromSql(r.paid_on),
+        canUndo: i === 0,
+      })),
+    );
   }),
 );
 
@@ -348,6 +424,39 @@ router.post(
                                          ELSE IIF(installments_paid + 1 > installments_total, installments_total, ISNULL(installments_paid, 0) + 1) END
           WHERE id = @o`,
         { o: oid, d: date(paidOn), n: date(addMonths(fromSql(o.next_due_on), o.every_months)) },
+        tx,
+      );
+    });
+    res.status(204).end();
+  }),
+);
+
+/**
+ * Deshace un "Marcar pagado" por error. Solo el último pago de la cuenta: así el vencimiento vuelve un período
+ * atrás y la cuota pagada se descuenta, sin adivinar fechas.
+ */
+router.delete(
+  '/obligation-payments/:id',
+  h(async (req, res) => {
+    const pid = idParam(req);
+    const [p] = await query(
+      `SELECT p.id, p.obligation_id, o.household_id, o.next_due_on, o.every_months, o.installments_total, o.installments_paid
+         FROM dbo.obligation_payments p JOIN dbo.obligations o ON o.id = p.obligation_id WHERE p.id = @p`,
+      { p: pid },
+    );
+    if (!p) throw notFound('No encontramos ese pago.');
+    await requireMember(p.household_id, req.userId);
+    const [last] = await query('SELECT TOP 1 id FROM dbo.obligation_payments WHERE obligation_id = @o ORDER BY paid_on DESC, id DESC', { o: p.obligation_id });
+    if (last.id !== p.id) throw conflict('Solo se puede deshacer el último pago.');
+    await transaction(async (tx) => {
+      await query('DELETE FROM dbo.obligation_payments WHERE id = @p', { p: pid }, tx);
+      const [prev] = await query('SELECT TOP 1 paid_on FROM dbo.obligation_payments WHERE obligation_id = @o ORDER BY paid_on DESC, id DESC', { o: p.obligation_id }, tx);
+      await query(
+        `UPDATE dbo.obligations
+            SET next_due_on = @n, last_paid_on = @l, updated_at = SYSUTCDATETIME(),
+                installments_paid = IIF(installments_total IS NULL OR installments_paid IS NULL OR installments_paid = 0, installments_paid, installments_paid - 1)
+          WHERE id = @o`,
+        { o: p.obligation_id, n: date(addMonths(fromSql(p.next_due_on), -p.every_months)), l: prev ? date(fromSql(prev.paid_on)) : null },
         tx,
       );
     });
@@ -402,7 +511,7 @@ router.get(
       p,
     );
     const payments = await query(
-      `SELECT p.id, p.amount_clp, p.paid_on, o.name, u.display_name
+      `SELECT p.id, p.obligation_id, p.amount_clp, p.paid_on, o.name, u.display_name
          FROM dbo.obligation_payments p JOIN dbo.obligations o ON o.id = p.obligation_id JOIN dbo.users u ON u.id = p.user_id
         WHERE o.household_id = @h AND p.paid_on >= @from`,
       p,
@@ -410,15 +519,15 @@ router.get(
     const rows = [
       ...incomes.map((r) => {
         const d = fromSql(r.received_on);
-        return { key: `i${r.id}`, kind: 'income', title: r.name, subtitle: `${formatShortDate(d)} · ${r.is_private ? 'Privado' : 'Compartido'}`, amount: Number(r.amount), date: d };
+        return { key: `i${r.id}`, id: r.id, kind: 'income', title: r.name, subtitle: `${formatShortDate(d)} · ${r.is_private ? 'Privado' : 'Compartido'}`, amount: Number(r.amount), date: d };
       }),
       ...expenses.map((r) => {
         const d = fromSql(r.spent_on);
-        return { key: `e${r.id}`, kind: 'expense', title: r.description || r.category, subtitle: `${formatShortDate(d)} · ${r.category} · ${firstName(r.display_name)}`, amount: Number(r.amount), date: d };
+        return { key: `e${r.id}`, id: r.id, kind: 'expense', title: r.description || r.category, subtitle: `${formatShortDate(d)} · ${r.category} · ${firstName(r.display_name)}`, amount: Number(r.amount), date: d };
       }),
       ...payments.map((r) => {
         const d = fromSql(r.paid_on);
-        return { key: `p${r.id}`, kind: 'payment', title: r.name, subtitle: `${formatShortDate(d)} · Pago de cuenta · ${firstName(r.display_name)}`, amount: Number(r.amount_clp), date: d };
+        return { key: `p${r.id}`, id: r.id, obligationId: r.obligation_id, kind: 'payment', title: r.name, subtitle: `${formatShortDate(d)} · Pago de cuenta · ${firstName(r.display_name)}`, amount: Number(r.amount_clp), date: d };
       }),
     ];
     rows.sort((a, b) => b.date.localeCompare(a.date) || b.key.localeCompare(a.key));
@@ -484,6 +593,104 @@ router.post(
   }),
 );
 
+async function ownIncomeSource(req) {
+  const sid = idParam(req);
+  const [s] = await query('SELECT * FROM dbo.income_sources WHERE id = @s', { s: sid });
+  if (!s || (s.is_private && s.user_id !== req.userId)) throw notFound('No encontramos esa fuente de ingreso.');
+  await requireMember(s.household_id, req.userId);
+  if (s.user_id !== req.userId) throw forbidden('Solo quien creó esta fuente puede cambiarla.');
+  return s;
+}
+
+router.patch(
+  '/income-sources/:id',
+  h(async (req, res) => {
+    const s = await ownIncomeSource(req);
+    const b = req.body;
+    const isPrivate = Boolean(b.isPrivate);
+    const row = await transaction(async (tx) => {
+      const [r] = await query(
+        'UPDATE dbo.income_sources SET name = @n, pay_day = @d, expected_amount = @a, is_private = @p OUTPUT INSERTED.* WHERE id = @s',
+        {
+          s: s.id,
+          n: str(b.name, 'el nombre', { max: 100 }),
+          d: num(b.payDay, 'El día de pago', { min: 1, max: 31, int: true }),
+          a: num(b.expectedAmount ?? 0, 'El monto esperado'),
+          p: isPrivate,
+        },
+        tx,
+      );
+      // Los pagos ya anotados siguen la privacidad de su fuente.
+      await query('UPDATE dbo.incomes SET is_private = @p WHERE source_id = @s', { s: s.id, p: isPrivate }, tx);
+      return r;
+    });
+    res.json(incomeSourceRow(row));
+  }),
+);
+
+/** Borra la fuente y todos sus pagos anotados. */
+router.delete(
+  '/income-sources/:id',
+  h(async (req, res) => {
+    const s = await ownIncomeSource(req);
+    await transaction(async (tx) => {
+      await query('DELETE FROM dbo.incomes WHERE source_id = @s', { s: s.id }, tx);
+      await query('DELETE FROM dbo.income_sources WHERE id = @s', { s: s.id }, tx);
+    });
+    res.status(204).end();
+  }),
+);
+
+async function ownIncome(req) {
+  const iid = idParam(req);
+  const [i] = await query('SELECT i.*, s.name FROM dbo.incomes i JOIN dbo.income_sources s ON s.id = i.source_id WHERE i.id = @i', { i: iid });
+  if (!i || (i.is_private && i.user_id !== req.userId)) throw notFound('No encontramos ese ingreso.');
+  await requireMember(i.household_id, req.userId);
+  return i;
+}
+
+const incomeRow = (r) => ({
+  id: r.id,
+  sourceId: r.source_id,
+  sourceName: r.name,
+  householdId: r.household_id,
+  userId: r.user_id,
+  amount: Number(r.amount),
+  receivedOn: fromSql(r.received_on),
+  isPrivate: Boolean(r.is_private),
+});
+
+router.get(
+  '/incomes/:id',
+  h(async (req, res) => {
+    res.json(incomeRow(await ownIncome(req)));
+  }),
+);
+
+router.patch(
+  '/incomes/:id',
+  h(async (req, res) => {
+    const i = await ownIncome(req);
+    if (i.user_id !== req.userId) throw forbidden('Solo quien anotó este ingreso puede cambiarlo.');
+    await query('UPDATE dbo.incomes SET amount = @a, received_on = @d WHERE id = @i', {
+      i: i.id,
+      a: num(req.body.amount, 'El monto', { min: 1 }),
+      d: date(isoDate(req.body.receivedOn, 'La fecha')),
+    });
+    res.json(incomeRow(await ownIncome(req)));
+  }),
+);
+
+router.delete(
+  '/incomes/:id',
+  h(async (req, res) => {
+    const i = await ownIncome(req);
+    if (i.user_id !== req.userId) throw forbidden('Solo quien anotó este ingreso puede borrarlo.');
+    await query('DELETE FROM dbo.incomes WHERE id = @i', { i: i.id });
+    res.status(204).end();
+  }),
+);
+
 router.get(
   '/households/:id/categories',
   h(async (req, res) => {
@@ -513,6 +720,64 @@ router.post(
       { h: hid, u: req.userId, c: categoryId, a: amount, d: description, s: date(spentOn) },
     );
     res.status(201).json({ id: row.id, householdId: hid, userId: req.userId, categoryId, amount, description, spentOn });
+  }),
+);
+
+/** Un gasto lo cambia o borra quien lo anotó, o un administrador del hogar. */
+async function editableExpense(req) {
+  const eid = idParam(req);
+  const [e] = await query('SELECT * FROM dbo.expenses WHERE id = @e', { e: eid });
+  if (!e) throw notFound('No encontramos ese gasto.');
+  const m = await requireMember(e.household_id, req.userId);
+  return { e, canEdit: e.user_id === req.userId || m.role === 'admin' };
+}
+
+const expenseRow = (r, canEdit) => ({
+  id: r.id,
+  householdId: r.household_id,
+  userId: r.user_id,
+  categoryId: r.category_id,
+  amount: Number(r.amount),
+  description: r.description ?? '',
+  spentOn: fromSql(r.spent_on),
+  canEdit,
+});
+
+router.get(
+  '/expenses/:id',
+  h(async (req, res) => {
+    const { e, canEdit } = await editableExpense(req);
+    res.json(expenseRow(e, canEdit));
+  }),
+);
+
+router.patch(
+  '/expenses/:id',
+  h(async (req, res) => {
+    const { e, canEdit } = await editableExpense(req);
+    if (!canEdit) throw forbidden('Solo quien anotó el gasto o un administrador puede cambiarlo.');
+    const amount = Number(req.body.amount);
+    if (!(amount > 0) || amount > 1e10) throw badRequest('El monto debe ser mayor a cero.');
+    const categoryId = num(req.body.categoryId, 'La categoría', { min: 1, int: true });
+    const [cat] = await query('SELECT 1 AS x FROM dbo.categories WHERE id = @c AND household_id = @h', { c: categoryId, h: e.household_id });
+    if (!cat) throw badRequest('La categoría no es válida.');
+    const description = typeof req.body.description === 'string' ? req.body.description.trim().slice(0, 200) : '';
+    const spentOn = req.body.spentOn ? isoDate(req.body.spentOn, 'La fecha') : fromSql(e.spent_on);
+    const [row] = await query(
+      'UPDATE dbo.expenses SET amount = @a, category_id = @c, description = @d, spent_on = @s OUTPUT INSERTED.* WHERE id = @e',
+      { e: e.id, a: amount, c: categoryId, d: description, s: date(spentOn) },
+    );
+    res.json(expenseRow(row, true));
+  }),
+);
+
+router.delete(
+  '/expenses/:id',
+  h(async (req, res) => {
+    const { e, canEdit } = await editableExpense(req);
+    if (!canEdit) throw forbidden('Solo quien anotó el gasto o un administrador puede borrarlo.');
+    await query('DELETE FROM dbo.expenses WHERE id = @e', { e: e.id });
+    res.status(204).end();
   }),
 );
 
@@ -567,6 +832,42 @@ router.post(
         if (e.number !== 2627) throw e; // otra persona la marcó al mismo tiempo: queda marcada
       }
     }
+    res.status(204).end();
+  }),
+);
+
+async function routineOf(req) {
+  const rid = idParam(req);
+  const [r] = await query('SELECT * FROM dbo.routines WHERE id = @r', { r: rid });
+  if (!r) throw notFound('No encontramos esa rutina.');
+  await requireMember(r.household_id, req.userId);
+  return r;
+}
+
+router.patch(
+  '/routines/:id',
+  h(async (req, res) => {
+    const r = await routineOf(req);
+    const frequency = req.body.frequency === 'weekly' ? 'weekly' : 'daily';
+    const [row] = await query('UPDATE dbo.routines SET name = @n, frequency = @f, points = @p OUTPUT INSERTED.* WHERE id = @r', {
+      r: r.id,
+      n: str(req.body.name, 'el nombre', { max: 100 }),
+      f: frequency,
+      p: num(req.body.points ?? 1, 'Los puntos', { min: 1, max: 13, int: true }),
+    });
+    res.json({ id: row.id, householdId: row.household_id, name: row.name, frequency: row.frequency, points: row.points });
+  }),
+);
+
+/** Borra la rutina y sus marcas (sus puntos salen del ranking). */
+router.delete(
+  '/routines/:id',
+  h(async (req, res) => {
+    const r = await routineOf(req);
+    await transaction(async (tx) => {
+      await query('DELETE FROM dbo.routine_checks WHERE routine_id = @r', { r: r.id }, tx);
+      await query('DELETE FROM dbo.routines WHERE id = @r', { r: r.id }, tx);
+    });
     res.status(204).end();
   }),
 );
@@ -671,6 +972,28 @@ router.post(
       { t: t.id, u: req.userId, d: date(today()) },
     );
     if (!updated.length) throw forbidden('Solo quien tomó la tarea puede cerrarla.');
+    res.status(204).end();
+  }),
+);
+
+router.patch(
+  '/backlog/:id',
+  h(async (req, res) => {
+    const t = await backlogTask(req);
+    await query('UPDATE dbo.backlog_tasks SET title = @title WHERE id = @t', { t: t.id, title: str(req.body.title, 'el título', { min: 3, max: 150 }) });
+    res.status(204).end();
+  }),
+);
+
+/** Borra la tarea y sus votos. Si ya estaba terminada, sus puntos salen del ranking. */
+router.delete(
+  '/backlog/:id',
+  h(async (req, res) => {
+    const t = await backlogTask(req);
+    await transaction(async (tx) => {
+      await query('DELETE FROM dbo.task_votes WHERE task_id = @t', { t: t.id }, tx);
+      await query('DELETE FROM dbo.backlog_tasks WHERE id = @t', { t: t.id }, tx);
+    });
     res.status(204).end();
   }),
 );

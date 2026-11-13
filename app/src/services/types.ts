@@ -86,9 +86,13 @@ export type ObligationPayment = {
   id: number;
   obligationId: number;
   userId: number;
+  /** Nombre de quien pagó */
+  paidBy: string;
   amountClp: number;
   ufValue?: number;
   paidOn: string;
+  /** Solo el último pago se puede deshacer */
+  canUndo: boolean;
 };
 
 export type Frequency = 'daily' | 'weekly';
@@ -126,12 +130,21 @@ export type TaskVote = { taskId: number; userId: number; points: number };
 /** Fila unificada para la lista de movimientos. */
 export type Movement = {
   key: string;
+  /** Id del gasto, ingreso o pago según kind */
+  id: number;
+  /** Solo pagos: la cuenta a la que pertenece */
+  obligationId?: number;
   kind: 'income' | 'expense' | 'payment';
   title: string;
   subtitle: string;
   amount: number;
   date: string;
 };
+
+/** Gasto visto por quien lo abre: si puede cambiarlo (lo anotó o es administrador). */
+export type ExpenseView = Expense & { canEdit: boolean };
+
+export type IncomeView = Income & { sourceName: string };
 
 export type ObligationStatus = 'overdue' | 'due_soon' | 'ok';
 

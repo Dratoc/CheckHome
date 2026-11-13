@@ -17,7 +17,7 @@ if (process.env.CORS_ORIGIN) {
     res.set({
       'Access-Control-Allow-Origin': process.env.CORS_ORIGIN,
       'Access-Control-Allow-Headers': 'Authorization, X-CheckHome-Token, Content-Type',
-      'Access-Control-Allow-Methods': 'GET, POST',
+      'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE',
     });
     if (req.method === 'OPTIONS') return res.status(204).end();
     next();

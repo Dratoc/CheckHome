@@ -53,7 +53,7 @@ export async function handle(request) {
 
 azf.app.http('api', {
   route: '{*path}',
-  methods: ['GET', 'POST', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   authLevel: 'anonymous',
   handler: handle,
 });

@@ -1,6 +1,7 @@
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { CompositeScreenProps, NavigatorScreenParams } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { IncomeSource, Routine } from '../services/types';
 
 export type TabParamList = {
   Home: undefined;
@@ -20,11 +21,18 @@ export type RootStackParamList = {
   JoinHousehold: undefined;
   // App
   Main: NavigatorScreenParams<TabParamList>;
-  AddExpense: undefined;
-  AddObligation: undefined;
-  AddIncomeSource: undefined;
-  AddIncome: { sourceId: number; name: string; expectedAmount: number; isPrivate: boolean };
-  AddRoutine: undefined;
+  /** Con expenseId, edita ese gasto */
+  AddExpense: { expenseId?: number } | undefined;
+  /** Con obligationId, edita esa cuenta */
+  AddObligation: { obligationId?: number } | undefined;
+  ObligationDetail: { obligationId: number; name: string };
+  /** Con source, edita esa fuente */
+  AddIncomeSource: { source?: IncomeSource } | undefined;
+  AddIncome: { source: IncomeSource };
+  EditIncome: { incomeId: number };
+  /** Con routine, edita esa rutina */
+  AddRoutine: { routine?: Routine } | undefined;
+  EditTask: { taskId: number; title: string };
   DesignPreview: undefined;
 };
 
