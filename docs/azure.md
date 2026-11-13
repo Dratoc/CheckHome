@@ -2,44 +2,39 @@
 
 Regla dura: **cero gasto**. Cuenta de prueba con límite de gasto, vence ~13 dic 2026. Nunca hacer "Upgrade".
 Todos los recursos van en `rg-checkhome` con las etiquetas `proyecto=app-hogar` y `entorno=dev`.
+La API corre en Static Web Apps Free ([ADR 0003](adr/0003-api-en-static-web-apps.md)); la prueba gratuita
+no tiene cuota de App Service F1.
 
 ## Recursos
 
 | Recurso | Nombre | SKU / plan | Por qué es gratis |
 | --- | --- | --- | --- |
 | Grupo de recursos | `rg-checkhome` | — | Los grupos no cobran |
-| Plan de App Service | `plan-checkhome` | F1 Linux | Nivel gratis permanente: 1 GB RAM, 60 min de CPU al día |
-| App Service (API) | `checkhome-api-<sufijo>` | en `plan-checkhome` | Va dentro del plan F1; sin Application Insights |
-| Servidor SQL lógico | `sql-checkhome-<sufijo>` | — | El servidor lógico no cobra |
-| Base de datos | `checkhome` | Serverless GP_S_Gen5_2 con **oferta gratuita** | 100.000 vCore-segundos y 32 GB al mes; al agotarse se **pausa** hasta el mes siguiente (`AutoPause`), no cobra |
 | Presupuesto | `presupuesto-checkhome` | USD 1 al mes | Los presupuestos no cobran; avisan al 50 %, 80 % y 100 % |
-
-Región: `brazilsouth` (la más cercana a Chile). Si la oferta gratuita de SQL no está disponible ahí para la
-suscripción, se usa `eastus2`.
+| Static Web App (API) | `swa-checkhome-<sufijo>` | Free, East US 2 | Plan Free permanente, con Functions administradas incluidas |
+| Servidor SQL lógico | `sql-checkhome-<sufijo>` | East US 2 | El servidor lógico no cobra |
+| Base de datos | `checkhome` | Serverless GP_S_Gen5_2 con **oferta gratuita** | 100.000 vCore-segundos y 32 GB al mes; al agotarse se **pausa** hasta el mes siguiente (`AutoPause`), no cobra |
 
 ## Secretos
 
 - Ninguna clave pasa por el repo ni por el chat.
 - La clave del administrador SQL se genera en el momento, se usa una vez (migraciones y usuario de la API) y no
   se guarda: si hace falta otra vez se resetea con `az sql server update --admin-password`.
-- La API se conecta con un usuario propio de la base, `checkhome_api`, con permisos solo de lectura y escritura
-  de datos. Su cadena de conexión y la clave del JWT viven solo en la configuración de App Service
+- La API se conecta con el usuario `checkhome_api`, con permisos solo de leer y escribir datos. Su cadena de
+  conexión y la clave del JWT viven solo en la configuración de la Static Web App
   (`SQL_CONNECTION_STRING`, `JWT_SECRET`).
 
-## Comandos (se corren en el Mac de Hernan con su `az login`)
-
-Variables:
+## Comandos (en el Mac de Hernan, con su `az login`)
 
 ```bash
-RG=rg-checkhome; LOC=brazilsouth; SFX=$(openssl rand -hex 3)
-APP=checkhome-api-$SFX; SQL=sql-checkhome-$SFX; DB=checkhome
+RG=rg-checkhome; LOC=eastus2; SFX=$(openssl rand -hex 3)
+SWA=swa-checkhome-$SFX; SQL=sql-checkhome-$SFX; DB=checkhome
 TAGS="proyecto=app-hogar entorno=dev"
 ```
 
-1. Chequeo previo (solo lectura): `az account show` debe decir la suscripción de prueba y `spendingLimit: On`.
-2. Grupo: `az group create -n $RG -l $LOC --tags $TAGS`
-3. Presupuesto USD 1 con alertas al correo de la cuenta: `bash infra/create-budget.sh`.
-4. SQL:
+1. Chequeo previo (solo lectura): `az account show` con `quotaId` FreeTrial y `spendingLimit: On`.
+2. Grupo y presupuesto: `az group create -n $RG -l brazilsouth --tags $TAGS` y `bash infra/create-budget.sh`.
+3. SQL:
    ```bash
    SQLPASS=$(openssl rand -base64 24)   # se queda en la terminal, no se imprime
    az sql server create -g $RG -n $SQL -l $LOC --admin-user checkhome_admin --admin-password "$SQLPASS"
@@ -49,18 +44,17 @@ TAGS="proyecto=app-hogar entorno=dev"
    az sql server firewall-rule create -g $RG -s $SQL -n azure-services --start-ip-address 0.0.0.0 --end-ip-address 0.0.0.0
    az sql server firewall-rule create -g $RG -s $SQL -n mac-migraciones --start-ip-address <ip> --end-ip-address <ip>
    ```
-5. Migraciones y usuario de la API (desde `api/`, con la conexión de administrador):
-   `npm run migrate` y `node scripts/create-api-user.js` (genera la clave de `checkhome_api`).
-   Después se borra la regla `mac-migraciones`.
-6. App Service:
+4. Migraciones y usuario de la API (desde `api/`, con la conexión de administrador):
+   `npm ci`, `npm run migrate` y `node scripts/create-api-user.js`. Después se borra la regla `mac-migraciones`.
+5. Static Web App:
    ```bash
-   az appservice plan create -g $RG -n plan-checkhome -l $LOC --is-linux --sku F1 --tags $TAGS
-   az webapp create -g $RG -p plan-checkhome -n $APP --runtime "NODE:22-lts" --https-only true --tags $TAGS
-   az webapp config appsettings set -g $RG -n $APP --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true \
+   az staticwebapp create -g $RG -n $SWA -l $LOC --sku Free --tags $TAGS
+   az staticwebapp appsettings set -g $RG -n $SWA --setting-names \
      SQL_CONNECTION_STRING="<de create-api-user>" JWT_SECRET="$(openssl rand -base64 48)"
    ```
-7. Despliegue: `bash api/scripts/package.sh` y `az webapp deploy -g $RG -n $APP --src-path checkhome-api.zip --type zip`.
-8. Prueba: `curl https://<host>/health` y `curl https://<host>/uf`.
+6. Despliegue: `SWA_NAME=$SWA bash api/scripts/deploy-swa.sh`.
+7. Prueba: `curl https://<host>/api/health` y `curl https://<host>/api/uf`.
+8. La URL `https://<host>/api` va en la variable `API_URL` del repo, para que el APK apunte a ella.
 
 ## Antes del 13 dic 2026
 

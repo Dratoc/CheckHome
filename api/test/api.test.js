@@ -23,7 +23,9 @@ async function call(method, path, body, token) {
 
 before(async () => {
   if (!cs) return;
-  server = spawn('node', ['src/server.js'], {
+  // TEST_TARGET=functions corre la misma prueba a través del adaptador de Azure Functions.
+  const entry = process.env.TEST_TARGET === 'functions' ? 'test/functions-host.js' : 'src/server.js';
+  server = spawn('node', [entry], {
     env: { ...process.env, SQL_CONNECTION_STRING: cs, JWT_SECRET: 'x'.repeat(40), PORT: String(PORT) },
     stdio: 'inherit',
   });

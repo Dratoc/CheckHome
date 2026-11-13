@@ -1,9 +1,9 @@
 # API de CheckHome
 
-Node/Express sobre Azure SQL, corre en App Service F1 ([ADR 0001](../docs/adr/0001-api-en-app-service-f1.md)).
+Node/Express sobre Azure SQL, corre en las Functions de Static Web Apps Free ([ADR 0003](../docs/adr/0003-api-en-static-web-apps.md)).
 La app la usa desde `app/src/services/api.ts`. Recursos y despliegue: [docs/azure.md](../docs/azure.md).
 
-## Variables (configuración de App Service, nunca en el repo)
+## Variables (configuración de la Static Web App, nunca en el repo)
 
 | Variable | Qué es |
 | --- | --- |

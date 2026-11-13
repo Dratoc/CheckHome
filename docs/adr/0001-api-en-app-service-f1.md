@@ -1,6 +1,6 @@
 # ADR 0001 — La API corre en Azure App Service F1
 
-- Estado: aceptada
+- Estado: reemplazada por la [ADR 0003](0003-api-en-static-web-apps.md): la prueba gratuita no tiene cuota F1
 - Fecha: 13 nov 2026
 
 ## Contexto

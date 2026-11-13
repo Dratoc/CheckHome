@@ -16,7 +16,7 @@ import type {
 } from './types';
 
 /**
- * Cliente de la API de CheckHome (carpeta api/, en Azure App Service). La URL se fija al compilar con
+ * Cliente de la API de CheckHome (carpeta api/, en las Functions de Azure Static Web Apps). La URL se fija al compilar con
  * EXPO_PUBLIC_API_URL. El usuario sale del JWT, así que los parámetros userId se mantienen solo para que
  * las pantallas no cambien; el servidor no confía en ellos.
  */
@@ -58,7 +58,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       headers: {
         Accept: 'application/json',
         ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        // Ambos encabezados: Static Web Apps podría reemplazar Authorization antes de llegar a la API.
+        ...(token ? { Authorization: `Bearer ${token}`, 'X-CheckHome-Token': token } : {}),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: controller.signal,
