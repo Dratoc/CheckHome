@@ -11,8 +11,8 @@ no tiene cuota de App Service F1.
 | --- | --- | --- | --- |
 | Grupo de recursos | `rg-checkhome` | — | Los grupos no cobran |
 | Presupuesto | `presupuesto-checkhome` | USD 1 al mes | Los presupuestos no cobran; avisan al 50 %, 80 % y 100 % |
-| Static Web App (API) | `swa-checkhome-<sufijo>` | Free, East US 2 | Plan Free permanente, con Functions administradas incluidas |
-| Servidor SQL lógico | `sql-checkhome-<sufijo>` | East US 2 | El servidor lógico no cobra |
+| Static Web App (API) | `swa-checkhome-<sufijo>` | Free, Central US | Plan Free permanente, con Functions administradas incluidas |
+| Servidor SQL lógico | `sql-checkhome-<sufijo>` | Central US | El servidor lógico no cobra |
 | Base de datos | `checkhome` | Serverless GP_S_Gen5_2 con **oferta gratuita** | 100.000 vCore-segundos y 32 GB al mes; al agotarse se **pausa** hasta el mes siguiente (`AutoPause`), no cobra |
 
 ## Secretos
@@ -27,7 +27,7 @@ no tiene cuota de App Service F1.
 ## Comandos (en el Mac de Hernan, con su `az login`)
 
 ```bash
-RG=rg-checkhome; LOC=eastus2; SFX=$(openssl rand -hex 3)
+RG=rg-checkhome; LOC=centralus; SFX=$(openssl rand -hex 3)
 SWA=swa-checkhome-$SFX; SQL=sql-checkhome-$SFX; DB=checkhome
 TAGS="proyecto=app-hogar entorno=dev"
 ```

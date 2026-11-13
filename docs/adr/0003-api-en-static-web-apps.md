@@ -15,7 +15,7 @@ La misma API Express corre como **Azure Functions administradas de Static Web Ap
 función HTTP (`api/src/functions/api.js`) recibe todo `/api/*` y se lo pasa a Express. El plan Free es gratis
 de forma permanente y no usa cuota de App Service.
 
-La base se crea en **East US 2**, la misma región de Static Web Apps, para que no haya tráfico entre regiones.
+La base y la Static Web App van en **Central US**, la misma región, para que no haya tráfico entre regiones. East US 2 y West US 2 no aceptaban servidores SQL nuevos al momento de crearlos.
 
 ## Consecuencias
 
