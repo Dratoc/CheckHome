@@ -39,3 +39,7 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Carpetas nativas generadas por `expo prebuild` (no se versionan)
+/android
+/ios

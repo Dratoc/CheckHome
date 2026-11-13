@@ -1,6 +1,7 @@
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { RootNavigator } from './src/navigation/RootNavigator';
+import { SessionProvider } from './src/state/SessionProvider';
 import { ThemeProvider, useAppFonts } from './src/theme';
-import { DesignPreview } from './src/screens/DesignPreview';
 
 export default function App() {
   const fontsReady = useAppFonts();
@@ -9,7 +10,9 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <DesignPreview />
+        <SessionProvider>
+          <RootNavigator />
+        </SessionProvider>
       </ThemeProvider>
     </SafeAreaProvider>
   );

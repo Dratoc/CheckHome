@@ -1,0 +1,150 @@
+/**
+ * Tipos de dominio. Siguen el modelo de docs/mvp.md y db/migrations/ (en camelCase).
+ * Cuando exista la API, sus respuestas deben calzar con estos tipos.
+ */
+
+export type User = {
+  id: number;
+  email: string;
+  username: string;
+  displayName: string;
+};
+
+export type Household = {
+  id: number;
+  name: string;
+  inviteCode: string;
+  currency: 'CLP';
+};
+
+export type MemberRole = 'admin' | 'member';
+
+export type Member = User & { role: MemberRole };
+
+/** Hogar visto por un usuario: incluye su rol y cuántos miembros tiene. */
+export type MyHousehold = Household & { role: MemberRole; memberCount: number };
+
+export type Category = {
+  id: number;
+  householdId: number;
+  kind: 'income' | 'expense';
+  name: string;
+  icon: string;
+};
+
+export type IncomeSource = {
+  id: number;
+  householdId: number;
+  userId: number;
+  name: string;
+  /** Día del mes en que suele llegar */
+  payDay: number;
+  expectedAmount: number;
+  isPrivate: boolean;
+};
+
+export type Income = {
+  id: number;
+  sourceId: number;
+  householdId: number;
+  userId: number;
+  amount: number;
+  receivedOn: string; // YYYY-MM-DD
+  isPrivate: boolean;
+};
+
+export type Expense = {
+  id: number;
+  householdId: number;
+  userId: number;
+  categoryId: number;
+  amount: number;
+  description: string;
+  spentOn: string; // YYYY-MM-DD
+};
+
+export type ObligationKind = 'subscription' | 'utility' | 'mortgage' | 'loan' | 'vehicle_doc' | 'other';
+
+export type Obligation = {
+  id: number;
+  householdId: number;
+  kind: ObligationKind;
+  name: string;
+  currency: 'CLP' | 'UF';
+  amount: number;
+  nextDueOn: string; // YYYY-MM-DD
+  /** Cada cuántos meses se repite (12 para papeles del auto) */
+  everyMonths: number;
+  accountNumber?: string;
+  lastPaidOn?: string;
+  /** Solo créditos: cuotas totales y pagadas */
+  installmentsTotal?: number;
+  installmentsPaid?: number;
+};
+
+export type ObligationPayment = {
+  id: number;
+  obligationId: number;
+  userId: number;
+  amountClp: number;
+  ufValue?: number;
+  paidOn: string;
+};
+
+export type Frequency = 'daily' | 'weekly';
+
+export type Routine = {
+  id: number;
+  householdId: number;
+  name: string;
+  frequency: Frequency;
+  points: number;
+};
+
+export type RoutineCheck = {
+  routineId: number;
+  userId: number;
+  /** Día (rutinas diarias) o lunes de la semana (rutinas semanales) */
+  periodStart: string;
+};
+
+export type BacklogStatus = 'estimating' | 'open' | 'taken' | 'done';
+
+export type BacklogTask = {
+  id: number;
+  householdId: number;
+  title: string;
+  status: BacklogStatus;
+  /** Puntos acordados: el voto más alto */
+  points?: number;
+  takenBy?: number;
+  doneOn?: string;
+};
+
+export type TaskVote = { taskId: number; userId: number; points: number };
+
+/** Fila unificada para la lista de movimientos. */
+export type Movement = {
+  key: string;
+  kind: 'income' | 'expense' | 'payment';
+  title: string;
+  subtitle: string;
+  amount: number;
+  date: string;
+};
+
+export type ObligationStatus = 'overdue' | 'due_soon' | 'ok';
+
+export type ObligationView = Obligation & { status: ObligationStatus; daysLeft: number; amountClp: number };
+
+export type MonthSummary = {
+  income: number;
+  expenses: number;
+  fixedPaid: number;
+  fixedPending: number;
+  balance: number;
+};
+
+export type RankingRow = { user: Member; points: number };
+
+export type BacklogTaskView = BacklogTask & { votes: TaskVote[]; myVote?: number; pendingVoters: number };

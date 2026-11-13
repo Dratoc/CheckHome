@@ -1,0 +1,79 @@
+import { DarkTheme, DefaultTheme, NavigationContainer, type Theme as NavTheme } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { useMemo } from 'react';
+import { useSession } from '../state/SessionProvider';
+import { useTheme } from '../theme';
+import { WelcomeScreen } from '../screens/auth/WelcomeScreen';
+import { RegisterScreen } from '../screens/auth/RegisterScreen';
+import { LoginScreen } from '../screens/auth/LoginScreen';
+import { ChooseHouseholdScreen } from '../screens/household/ChooseHouseholdScreen';
+import { CreateHouseholdScreen } from '../screens/household/CreateHouseholdScreen';
+import { JoinHouseholdScreen } from '../screens/household/JoinHouseholdScreen';
+import { AddExpenseScreen } from '../screens/AddExpenseScreen';
+import { DesignPreview } from '../screens/DesignPreview';
+import { MainTabs } from './MainTabs';
+import type { RootStackParamList } from './types';
+
+const Stack = createNativeStackNavigator<RootStackParamList>();
+
+/**
+ * Tres etapas según la sesión:
+ * 1. Sin usuario: bienvenida, registro e ingreso.
+ * 2. Con usuario y sin hogar: elegir, crear o unirse a un hogar.
+ * 3. Con hogar: las cuatro pestañas y los modales.
+ */
+export function RootNavigator() {
+  const t = useTheme();
+  const { user, household } = useSession();
+
+  const navTheme = useMemo<NavTheme>(() => {
+    const base = t.scheme === 'dark' ? DarkTheme : DefaultTheme;
+    return {
+      ...base,
+      colors: {
+        ...base.colors,
+        primary: t.colors.primary,
+        background: t.colors.background,
+        card: t.colors.surface,
+        text: t.colors.text,
+        border: t.colors.border,
+        notification: t.colors.danger,
+      },
+    };
+  }, [t]);
+
+  return (
+    <NavigationContainer theme={navTheme}>
+      <Stack.Navigator
+        screenOptions={{
+          headerShadowVisible: false,
+          headerStyle: { backgroundColor: t.colors.background },
+          headerTintColor: t.colors.primary,
+          headerTitleStyle: { fontFamily: t.fontFamily.bold, color: t.colors.text },
+          headerBackButtonDisplayMode: 'minimal',
+          contentStyle: { backgroundColor: t.colors.background },
+        }}
+      >
+        {!user ? (
+          <Stack.Group>
+            <Stack.Screen name="Welcome" component={WelcomeScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="Register" component={RegisterScreen} options={{ title: 'Crear cuenta' }} />
+            <Stack.Screen name="Login" component={LoginScreen} options={{ title: 'Ingresar' }} />
+          </Stack.Group>
+        ) : !household ? (
+          <Stack.Group>
+            <Stack.Screen name="ChooseHousehold" component={ChooseHouseholdScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="CreateHousehold" component={CreateHouseholdScreen} options={{ title: 'Crear hogar' }} />
+            <Stack.Screen name="JoinHousehold" component={JoinHouseholdScreen} options={{ title: 'Unirme a un hogar' }} />
+          </Stack.Group>
+        ) : (
+          <Stack.Group>
+            <Stack.Screen name="Main" component={MainTabs} options={{ headerShown: false }} />
+            <Stack.Screen name="AddExpense" component={AddExpenseScreen} options={{ title: 'Nuevo gasto', presentation: 'modal' }} />
+            <Stack.Screen name="DesignPreview" component={DesignPreview} options={{ title: 'Sistema de diseño' }} />
+          </Stack.Group>
+        )}
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+}
