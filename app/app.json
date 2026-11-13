@@ -21,7 +21,13 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "output": "single",
+      "name": "CheckHome",
+      "shortName": "CheckHome",
+      "lang": "es",
+      "themeColor": "#0B7A5E",
+      "backgroundColor": "#F7F6F3"
     },
     "plugins": [
       "expo-font",
