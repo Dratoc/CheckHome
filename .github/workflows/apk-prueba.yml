@@ -31,7 +31,8 @@ jobs:
         working-directory: app
     env:
       # Dirección de la API en Azure (no es secreta). Queda fija dentro del APK al compilar.
-      EXPO_PUBLIC_API_URL: ${{ vars.API_URL }}
+      # La variable API_URL del repo, si existe, la reemplaza.
+      EXPO_PUBLIC_API_URL: ${{ vars.API_URL || 'https://purple-coast-025bebe10.8.azurestaticapps.net/api' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -74,7 +75,7 @@ jobs:
       - name: Publicar en el link fijo
         # Solo ramas de este repo (los PR desde forks no tienen permiso de escritura) y solo si el APK ya apunta
         # a la API: un APK sin API_URL no sirve y reemplazaría al último que funciona.
-        if: vars.API_URL != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: env.EXPO_PUBLIC_API_URL != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository)
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.event.pull_request.head.sha || github.sha }}

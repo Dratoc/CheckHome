@@ -52,9 +52,17 @@ TAGS="proyecto=app-hogar entorno=dev"
    az staticwebapp appsettings set -g $RG -n $SWA --setting-names \
      SQL_CONNECTION_STRING="<de create-api-user>" JWT_SECRET="$(openssl rand -base64 48)"
    ```
-6. Despliegue: `SWA_NAME=$SWA bash api/scripts/deploy-swa.sh`.
+6. Despliegue: `PATH=/opt/homebrew/opt/node@22/bin:$PATH SWA_NAME=$SWA bash api/scripts/deploy-swa.sh`
+   (la CLI de Static Web Apps necesita Node 22.12 o más nuevo; en el Mac está `node@22` de Homebrew aparte).
 7. Prueba: `curl https://<host>/api/health` y `curl https://<host>/api/uf`.
-8. La URL `https://<host>/api` va en la variable `API_URL` del repo, para que el APK apunte a ella.
+8. La URL `https://<host>/api` queda en `.github/workflows/apk-prueba.yml` (o en la variable `API_URL` del repo).
+
+## Estado actual (13 nov 2026)
+
+- Static Web App `swa-checkhome-e20fee` (Free, Central US): https://purple-coast-025bebe10.8.azurestaticapps.net/api
+- SQL `sql-checkhome-e20fee` / base `checkhome` (oferta gratuita, AutoPause), migraciones 0001 y 0002.
+- Firewall: solo `azure-services`. Presupuesto `presupuesto-checkhome` USD 1.
+- Probado: `/health` 200, `/uf` 200 (mindicador), registro 201, `/households` 200 con `X-CheckHome-Token`.
 
 ## Antes del 13 dic 2026
 

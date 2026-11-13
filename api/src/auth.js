@@ -16,9 +16,10 @@ export function signToken(userId) {
 
 /** Middleware: exige Authorization: Bearer <token> y deja req.userId. */
 export function requireAuth(req, _res, next) {
-  // X-CheckHome-Token es respaldo por si el proxy de Static Web Apps reemplaza Authorization.
+  // El proxy de Static Web Apps reemplaza Authorization por su propio token, así que X-CheckHome-Token manda.
+  // Authorization queda para desarrollo local y otros hosts.
   const header = req.headers.authorization ?? '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : String(req.headers['x-checkhome-token'] ?? '');
+  const token = String(req.headers['x-checkhome-token'] ?? '') || (header.startsWith('Bearer ') ? header.slice(7) : '');
   try {
     const payload = jwt.verify(token, secret());
     req.userId = Number(payload.sub);
