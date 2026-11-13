@@ -18,7 +18,7 @@ import { useMutation, useQuery } from '../../hooks/useQuery';
 import { ExpenseFab } from '../../navigation/ExpenseFab';
 import type { TabScreenProps } from '../../navigation/types';
 import * as api from '../../services/api';
-import type { ObligationView } from '../../services/types';
+import type { IncomeSource, ObligationView } from '../../services/types';
 import { useHousehold } from '../../state/SessionProvider';
 import { useTheme } from '../../theme';
 import { obligationBadge, obligationIcon, obligationSubtitle } from './obligationUi';
@@ -45,8 +45,13 @@ export function AccountsScreen({ navigation }: TabScreenProps<'Accounts'>) {
         ]}
       />
       {section === 'movements' && <Movements onAdd={() => navigation.navigate('AddExpense')} />}
-      {section === 'obligations' && <Obligations />}
-      {section === 'income' && <IncomeSources />}
+      {section === 'obligations' && <Obligations onAdd={() => navigation.navigate('AddObligation')} />}
+      {section === 'income' && (
+        <IncomeSources
+          onAdd={() => navigation.navigate('AddIncomeSource')}
+          onReceive={(s) => navigation.navigate('AddIncome', { sourceId: s.id, name: s.name, expectedAmount: s.expectedAmount, isPrivate: s.isPrivate })}
+        />
+      )}
 
       <Card padding="md" style={{ marginTop: t.spacing.sm }}>
         <Text variant="label">Próximamente</Text>
@@ -90,7 +95,7 @@ function Movements({ onAdd }: { onAdd: () => void }) {
   );
 }
 
-function Obligations() {
+function Obligations({ onAdd }: { onAdd: () => void }) {
   const { user, household } = useHousehold();
   const query = useQuery(() => api.listObligations(household.id), [household.id]);
   const pay = useMutation(api.payObligation);
@@ -109,7 +114,7 @@ function Obligations() {
       isEmpty={(d) => d.length === 0}
       empty={
         <Card>
-          <EmptyState title="Sin cuentas registradas" message="Aquí aparecerán luz, agua, dividendo, créditos y papeles del auto." />
+          <EmptyState title="Sin cuentas registradas" message="Agrega luz, agua, dividendo, créditos y papeles del auto para no olvidar ningún vencimiento." action="Agregar cuenta" onAction={onAdd} />
         </Card>
       }
     >
@@ -119,6 +124,7 @@ function Obligations() {
           {rows.map((o) => (
             <ObligationCard key={o.id} o={o} paying={payingId === o.id} onPay={() => onPay(o)} />
           ))}
+          <Button label="Agregar cuenta" variant="secondary" block onPress={onAdd} />
         </>
       )}
     </QueryView>
@@ -147,7 +153,7 @@ function ObligationCard({ o, paying, onPay }: { o: ObligationView; paying: boole
   );
 }
 
-function IncomeSources() {
+function IncomeSources({ onAdd, onReceive }: { onAdd: () => void; onReceive: (s: IncomeSource) => void }) {
   const { user, household } = useHousehold();
   const query = useQuery(() => api.listIncomeSources(household.id, user.id), [household.id, user.id]);
   return (
@@ -155,20 +161,24 @@ function IncomeSources() {
       <QueryView
         query={query}
         isEmpty={(d) => d.length === 0}
-        empty={<EmptyState title="Sin fuentes de ingreso" message="Define una vez tu sueldo o arriendo con su día de pago." />}
+        empty={<EmptyState title="Sin fuentes de ingreso" message="Define una vez tu sueldo o arriendo con su día de pago." action="Agregar fuente" onAction={onAdd} />}
       >
-        {(rows) =>
-          rows.map((s, i) => (
-            <ListItem
-              key={s.id}
-              title={s.name}
-              subtitle={`Llega el día ${s.payDay} · ${s.isPrivate ? 'Privado' : 'Compartido'}`}
-              leading={<IconCircle name={s.isPrivate ? 'lock-closed-outline' : 'cash-outline'} tone="primary" />}
-              trailing={<Amount value={s.expectedAmount} sign="income" />}
-              divider={i < rows.length - 1}
-            />
-          ))
-        }
+        {(rows) => (
+          <>
+            {rows.map((s) => (
+              <ListItem
+                key={s.id}
+                title={s.name}
+                subtitle={`Llega el día ${s.payDay} · ${s.isPrivate ? 'Privado' : 'Compartido'} · Toca para anotar un pago`}
+                leading={<IconCircle name={s.isPrivate ? 'lock-closed-outline' : 'cash-outline'} tone="primary" />}
+                trailing={<Amount value={s.expectedAmount} sign="income" />}
+                onPress={() => onReceive(s)}
+                divider
+              />
+            ))}
+            <Button label="Agregar fuente" variant="ghost" block onPress={onAdd} />
+          </>
+        )}
       </QueryView>
     </Card>
   );

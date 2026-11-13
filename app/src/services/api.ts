@@ -1,5 +1,3 @@
-import { addMonths, daysUntil, formatShortDate, isSameMonth, today, weekStart } from '../utils/dates';
-import { DEFAULT_EXPENSE_CATEGORIES, UF_VALUE, db, newId } from './mockDb';
 import type {
   BacklogTaskView,
   Category,
@@ -10,6 +8,7 @@ import type {
   MonthSummary,
   Movement,
   MyHousehold,
+  ObligationKind,
   ObligationView,
   RankingRow,
   Routine,
@@ -17,45 +16,75 @@ import type {
 } from './types';
 
 /**
- * API simulada. Cada función imita lo que hará la API real (latencia incluida) para que las
- * pantallas ya manejen carga y error. Al conectar Azure solo cambia este archivo.
+ * Cliente de la API de CheckHome (carpeta api/, en Azure App Service). La URL se fija al compilar con
+ * EXPO_PUBLIC_API_URL. El usuario sale del JWT, así que los parámetros userId se mantienen solo para que
+ * las pantallas no cambien; el servidor no confía en ellos.
  */
 
-const LATENCY_MS = 350;
+export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? '').replace(/\/$/, '');
 
-export class ApiError extends Error {}
-
-function delay<T>(fn: () => T): Promise<T> {
-  return new Promise((resolve, reject) =>
-    setTimeout(() => {
-      try {
-        resolve(fn());
-      } catch (e) {
-        reject(e);
-      }
-    }, LATENCY_MS),
-  );
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status = 0,
+  ) {
+    super(message);
+  }
 }
 
-function publicUser(u: User): User {
-  return { id: u.id, email: u.email, username: u.username, displayName: u.displayName };
+let token: string | null = null;
+let onUnauthorized: (() => void) | null = null;
+
+export function setToken(t: string | null) {
+  token = t;
 }
 
-function requireMember(householdId: number, userId: number) {
-  const m = db.memberships.find((x) => x.householdId === householdId && x.userId === userId);
-  if (!m) throw new ApiError('No perteneces a este hogar.');
-  return m;
+/** La sesión registra aquí qué hacer si el servidor responde 401 (token vencido). */
+export function setUnauthorizedHandler(fn: (() => void) | null) {
+  onUnauthorized = fn;
 }
 
-const INVITE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+// App Service F1 se duerme sin uso: la primera llamada puede tardar ~20 s en despertar.
+const TIMEOUT_MS = 45_000;
 
-function newInviteCode() {
-  let code = '';
-  do {
-    code = Array.from({ length: 8 }, () => INVITE_ALPHABET[Math.floor(Math.random() * INVITE_ALPHABET.length)]).join('');
-  } while (db.households.some((h) => h.inviteCode === code));
-  return code;
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  if (!API_URL) throw new ApiError('La app no tiene configurada la dirección del servidor.');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(API_URL + path, {
+      method,
+      headers: {
+        Accept: 'application/json',
+        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+  } catch {
+    throw new ApiError('No pudimos conectar con el servidor. Revisa tu internet e intenta de nuevo.');
+  } finally {
+    clearTimeout(timer);
+  }
+  if (res.status === 401 && token) onUnauthorized?.();
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : undefined;
+  } catch {
+    data = undefined;
+  }
+  if (!res.ok) {
+    const msg = (data as { error?: string } | undefined)?.error ?? 'Algo falló en el servidor. Intenta de nuevo.';
+    throw new ApiError(msg, res.status);
+  }
+  return data as T;
 }
+
+const get = <T>(path: string) => request<T>('GET', path);
+const post = <T = void>(path: string, body: unknown = {}) => request<T>('POST', path, body);
 
 /** Normaliza lo que escribe la persona: sin espacios ni guiones, en mayúscula. */
 export function normalizeInviteCode(raw: string) {
@@ -64,317 +93,145 @@ export function normalizeInviteCode(raw: string) {
 
 // ---------- Acceso ----------
 
+export type AuthResult = { token: string; user: User };
+
 export type RegisterInput = { email: string; username: string; displayName: string; password: string };
 
-export function register(input: RegisterInput): Promise<User> {
-  return delay(() => {
-    const email = input.email.trim().toLowerCase();
-    const username = input.username.trim().toLowerCase();
-    if (db.users.some((u) => u.email === email)) throw new ApiError('Ese correo ya tiene una cuenta.');
-    if (db.users.some((u) => u.username === username)) throw new ApiError('Ese nombre de usuario ya está en uso.');
-    const user = { id: newId(), email, username, displayName: input.displayName.trim(), password: input.password };
-    db.users.push(user);
-    return publicUser(user);
-  });
+export function register(input: RegisterInput): Promise<AuthResult> {
+  return post('/auth/register', input);
 }
 
-export function login(identifier: string, password: string): Promise<User> {
-  return delay(() => {
-    const id = identifier.trim().toLowerCase();
-    const user = db.users.find((u) => u.email === id || u.username === id);
-    if (!user || user.password !== password) throw new ApiError('Correo o contraseña incorrectos.');
-    return publicUser(user);
-  });
+export function login(identifier: string, password: string): Promise<AuthResult> {
+  return post('/auth/login', { identifier, password });
 }
 
 // ---------- Hogares ----------
 
-export function listMyHouseholds(userId: number): Promise<MyHousehold[]> {
-  return delay(() =>
-    db.memberships
-      .filter((m) => m.userId === userId)
-      .map((m) => {
-        const h = db.households.find((x) => x.id === m.householdId)!;
-        return { ...h, role: m.role, memberCount: db.memberships.filter((x) => x.householdId === h.id).length };
-      }),
-  );
+export function listMyHouseholds(_userId?: number): Promise<MyHousehold[]> {
+  return get('/households');
 }
 
-export function createHousehold(userId: number, name: string): Promise<MyHousehold> {
-  return delay(() => {
-    const h = { id: newId(), name: name.trim(), inviteCode: newInviteCode(), currency: 'CLP' as const };
-    db.households.push(h);
-    db.memberships.push({ householdId: h.id, userId, role: 'admin' });
-    db.categories.push(...DEFAULT_EXPENSE_CATEGORIES.map((c) => ({ ...c, id: newId(), householdId: h.id })));
-    return { ...h, role: 'admin', memberCount: 1 };
-  });
+export function createHousehold(_userId: number, name: string): Promise<MyHousehold> {
+  return post('/households', { name });
 }
 
-export function joinHousehold(userId: number, rawCode: string): Promise<MyHousehold> {
-  return delay(() => {
-    const code = normalizeInviteCode(rawCode);
-    const h = db.households.find((x) => x.inviteCode === code);
-    if (!h) throw new ApiError('No encontramos un hogar con ese código. Revisa que esté bien escrito.');
-    if (db.memberships.some((m) => m.householdId === h.id && m.userId === userId)) {
-      throw new ApiError(`Ya eres parte de ${h.name}.`);
-    }
-    db.memberships.push({ householdId: h.id, userId, role: 'member' });
-    return { ...h, role: 'member', memberCount: db.memberships.filter((x) => x.householdId === h.id).length };
-  });
+export function joinHousehold(_userId: number, rawCode: string): Promise<MyHousehold> {
+  return post('/households/join', { code: normalizeInviteCode(rawCode) });
 }
 
 export function listMembers(householdId: number): Promise<Member[]> {
-  return delay(() =>
-    db.memberships
-      .filter((m) => m.householdId === householdId)
-      .map((m) => ({ ...publicUser(db.users.find((u) => u.id === m.userId)!), role: m.role })),
-  );
+  return get(`/households/${householdId}/members`);
 }
 
-export function regenerateInviteCode(householdId: number, userId: number): Promise<string> {
-  return delay(() => {
-    if (requireMember(householdId, userId).role !== 'admin') throw new ApiError('Solo un administrador puede cambiar el código.');
-    const h = db.households.find((x) => x.id === householdId)!;
-    h.inviteCode = newInviteCode();
-    return h.inviteCode;
-  });
+export async function regenerateInviteCode(householdId: number, _userId?: number): Promise<string> {
+  return (await post<{ inviteCode: string }>(`/households/${householdId}/invite-code`)).inviteCode;
 }
 
 // ---------- Cuentas ----------
 
-function toClp(o: { currency: 'CLP' | 'UF'; amount: number }) {
-  return o.currency === 'UF' ? Math.round(o.amount * UF_VALUE) : o.amount;
+export async function getUfValue(): Promise<number> {
+  return (await get<{ value: number }>('/uf')).value;
 }
 
-function obligationViews(householdId: number): ObligationView[] {
-  return db.obligations
-    .filter((o) => o.householdId === householdId)
-    .map((o) => {
-      const daysLeft = daysUntil(o.nextDueOn);
-      const status = daysLeft < 0 ? 'overdue' : daysLeft <= 7 ? 'due_soon' : 'ok';
-      return { ...o, daysLeft, status, amountClp: toClp(o) } as ObligationView;
-    })
-    .sort((a, b) => a.nextDueOn.localeCompare(b.nextDueOn));
-}
-
-function visibleIncomes(householdId: number, userId: number) {
-  return db.incomes.filter((i) => i.householdId === householdId && (!i.isPrivate || i.userId === userId));
-}
-
-export function getUfValue(): Promise<number> {
-  return delay(() => UF_VALUE);
-}
-
-export function getMonthSummary(householdId: number, userId: number): Promise<MonthSummary> {
-  return delay(() => {
-    requireMember(householdId, userId);
-    const t = today();
-    const income = visibleIncomes(householdId, userId)
-      .filter((i) => isSameMonth(i.receivedOn, t))
-      .reduce((s, i) => s + i.amount, 0);
-    const expenses = db.expenses
-      .filter((e) => e.householdId === householdId && isSameMonth(e.spentOn, t))
-      .reduce((s, e) => s + e.amount, 0);
-    const ids = new Set(db.obligations.filter((o) => o.householdId === householdId).map((o) => o.id));
-    const fixedPaid = db.obligationPayments
-      .filter((p) => ids.has(p.obligationId) && isSameMonth(p.paidOn, t))
-      .reduce((s, p) => s + p.amountClp, 0);
-    const fixedPending = obligationViews(householdId)
-      .filter((o) => o.everyMonths === 1 && (isSameMonth(o.nextDueOn, t) || o.status === 'overdue'))
-      .reduce((s, o) => s + o.amountClp, 0);
-    return { income, expenses, fixedPaid, fixedPending, balance: income - expenses - fixedPaid };
-  });
+export function getMonthSummary(householdId: number, _userId?: number): Promise<MonthSummary> {
+  return get(`/households/${householdId}/summary`);
 }
 
 export function listObligations(householdId: number): Promise<ObligationView[]> {
-  return delay(() => obligationViews(householdId));
+  return get(`/households/${householdId}/obligations`);
 }
 
-export function payObligation(obligationId: number, userId: number): Promise<void> {
-  return delay(() => {
-    const o = db.obligations.find((x) => x.id === obligationId);
-    if (!o) throw new ApiError('No encontramos esa cuenta.');
-    requireMember(o.householdId, userId);
-    const paidOn = today();
-    db.obligationPayments.push({
-      id: newId(),
-      obligationId,
-      userId,
-      amountClp: toClp(o),
-      ufValue: o.currency === 'UF' ? UF_VALUE : undefined,
-      paidOn,
-    });
-    o.lastPaidOn = paidOn;
-    o.nextDueOn = addMonths(o.nextDueOn, o.everyMonths);
-    if (o.installmentsTotal) o.installmentsPaid = Math.min(o.installmentsTotal, (o.installmentsPaid ?? 0) + 1);
-  });
+export type ObligationInput = {
+  kind: ObligationKind;
+  name: string;
+  currency: 'CLP' | 'UF';
+  amount: number;
+  nextDueOn: string;
+  everyMonths: number;
+  accountNumber?: string;
+  installmentsTotal?: number;
+  installmentsPaid?: number;
+};
+
+export function createObligation(householdId: number, input: ObligationInput): Promise<ObligationView> {
+  return post(`/households/${householdId}/obligations`, input);
 }
 
-export function listMovements(householdId: number, userId: number): Promise<Movement[]> {
-  return delay(() => {
-    const userName = (id: number) => db.users.find((u) => u.id === id)?.displayName.split(' ')[0] ?? '';
-    const category = (id: number) => db.categories.find((c) => c.id === id)?.name ?? 'Otros';
-    const incomes: Movement[] = visibleIncomes(householdId, userId).map((i) => ({
-      key: `i${i.id}`,
-      kind: 'income',
-      title: db.incomeSources.find((s) => s.id === i.sourceId)?.name ?? 'Ingreso',
-      subtitle: `${formatShortDate(i.receivedOn)} · ${i.isPrivate ? 'Privado' : 'Compartido'}`,
-      amount: i.amount,
-      date: i.receivedOn,
-    }));
-    const expenses: Movement[] = db.expenses
-      .filter((e) => e.householdId === householdId)
-      .map((e) => ({
-        key: `e${e.id}`,
-        kind: 'expense',
-        title: e.description || category(e.categoryId),
-        subtitle: `${formatShortDate(e.spentOn)} · ${category(e.categoryId)} · ${userName(e.userId)}`,
-        amount: e.amount,
-        date: e.spentOn,
-      }));
-    const payments: Movement[] = db.obligationPayments
-      .map((p) => ({ p, o: db.obligations.find((o) => o.id === p.obligationId)! }))
-      .filter(({ o }) => o.householdId === householdId)
-      .map(({ p, o }) => ({
-        key: `p${p.id}`,
-        kind: 'payment',
-        title: o.name,
-        subtitle: `${formatShortDate(p.paidOn)} · Pago de cuenta · ${userName(p.userId)}`,
-        amount: p.amountClp,
-        date: p.paidOn,
-      }));
-    return [...incomes, ...expenses, ...payments].sort((a, b) => b.date.localeCompare(a.date) || a.key.localeCompare(b.key));
-  });
+export function payObligation(obligationId: number, _userId?: number): Promise<void> {
+  return post(`/obligations/${obligationId}/pay`);
 }
 
-export function listIncomeSources(householdId: number, userId: number): Promise<IncomeSource[]> {
-  return delay(() => db.incomeSources.filter((s) => s.householdId === householdId && (!s.isPrivate || s.userId === userId)));
+export function listMovements(householdId: number, _userId?: number): Promise<Movement[]> {
+  return get(`/households/${householdId}/movements`);
+}
+
+export function listIncomeSources(householdId: number, _userId?: number): Promise<IncomeSource[]> {
+  return get(`/households/${householdId}/income-sources`);
+}
+
+export type IncomeSourceInput = { name: string; payDay: number; expectedAmount: number; isPrivate: boolean };
+
+export function createIncomeSource(householdId: number, input: IncomeSourceInput): Promise<IncomeSource> {
+  return post(`/households/${householdId}/income-sources`, input);
+}
+
+/** Anota un pago recibido de una fuente (por defecto, con fecha de hoy). */
+export function addIncome(sourceId: number, amount: number, receivedOn?: string): Promise<void> {
+  return post(`/income-sources/${sourceId}/incomes`, { amount, receivedOn });
 }
 
 export function listExpenseCategories(householdId: number): Promise<Category[]> {
-  return delay(() => db.categories.filter((c) => c.householdId === householdId && c.kind === 'expense'));
+  return get(`/households/${householdId}/categories?kind=expense`);
 }
 
 export type ExpenseInput = { amount: number; categoryId: number; description: string };
 
-export function addExpense(householdId: number, userId: number, input: ExpenseInput): Promise<Expense> {
-  return delay(() => {
-    requireMember(householdId, userId);
-    if (!(input.amount > 0)) throw new ApiError('El monto debe ser mayor a cero.');
-    const e = { id: newId(), householdId, userId, spentOn: today(), ...input, description: input.description.trim() };
-    db.expenses.push(e);
-    return e;
-  });
+export function addExpense(householdId: number, _userId: number, input: ExpenseInput): Promise<Expense> {
+  return post(`/households/${householdId}/expenses`, input);
 }
 
 // ---------- Tareas ----------
 
-function periodStart(f: Frequency) {
-  return f === 'daily' ? today() : weekStart(today());
-}
-
 export type RoutineWithCheck = Routine & { doneBy?: number };
 
 export function listRoutines(householdId: number): Promise<RoutineWithCheck[]> {
-  return delay(() =>
-    db.routines
-      .filter((r) => r.householdId === householdId)
-      .map((r) => ({
-        ...r,
-        doneBy: db.routineChecks.find((c) => c.routineId === r.id && c.periodStart === periodStart(r.frequency))?.userId,
-      })),
-  );
+  return get(`/households/${householdId}/routines`);
 }
 
-export function toggleRoutine(routineId: number, userId: number): Promise<void> {
-  return delay(() => {
-    const r = db.routines.find((x) => x.id === routineId);
-    if (!r) throw new ApiError('No encontramos esa rutina.');
-    requireMember(r.householdId, userId);
-    const p = periodStart(r.frequency);
-    const idx = db.routineChecks.findIndex((c) => c.routineId === routineId && c.periodStart === p);
-    if (idx >= 0) db.routineChecks.splice(idx, 1);
-    else db.routineChecks.push({ routineId, userId, periodStart: p });
-  });
+export type RoutineInput = { name: string; frequency: Frequency; points: number };
+
+export function createRoutine(householdId: number, input: RoutineInput): Promise<Routine> {
+  return post(`/households/${householdId}/routines`, input);
 }
 
-export function listBacklog(householdId: number, userId: number): Promise<BacklogTaskView[]> {
-  return delay(() => {
-    const members = db.memberships.filter((m) => m.householdId === householdId).length;
-    return db.backlog
-      .filter((b) => b.householdId === householdId)
-      .map((b) => {
-        const votes = db.taskVotes.filter((v) => v.taskId === b.id);
-        return { ...b, votes, myVote: votes.find((v) => v.userId === userId)?.points, pendingVoters: members - votes.length };
-      });
-  });
+export function toggleRoutine(routineId: number, _userId?: number): Promise<void> {
+  return post(`/routines/${routineId}/toggle`);
+}
+
+export function listBacklog(householdId: number, _userId?: number): Promise<BacklogTaskView[]> {
+  return get(`/households/${householdId}/backlog`);
 }
 
 export const FIBONACCI = [1, 2, 3, 5, 8, 13] as const;
 
-/**
- * Planning poker: cada miembro vota. Cuando votaron todos, queda el voto más alto.
- * En la simulación se cierra con mayoría simple, porque los demás miembros no pueden votar.
- */
-export function voteTask(taskId: number, userId: number, points: number): Promise<void> {
-  return delay(() => {
-    const b = db.backlog.find((x) => x.id === taskId);
-    if (!b || b.status !== 'estimating') throw new ApiError('Esta tarea ya no está en votación.');
-    requireMember(b.householdId, userId);
-    const existing = db.taskVotes.find((v) => v.taskId === taskId && v.userId === userId);
-    if (existing) existing.points = points;
-    else db.taskVotes.push({ taskId, userId, points });
-    const votes = db.taskVotes.filter((v) => v.taskId === taskId);
-    const members = db.memberships.filter((m) => m.householdId === b.householdId).length;
-    if (votes.length >= Math.ceil(members / 2) + 1 || votes.length >= members) {
-      b.points = Math.max(...votes.map((v) => v.points));
-      b.status = 'open';
-    }
-  });
+/** Planning poker: cada miembro vota y, cuando votaron todos, queda el voto más alto. */
+export function voteTask(taskId: number, _userId: number, points: number): Promise<void> {
+  return post(`/backlog/${taskId}/vote`, { points });
 }
 
-export function addBacklogTask(householdId: number, userId: number, title: string): Promise<void> {
-  return delay(() => {
-    requireMember(householdId, userId);
-    db.backlog.push({ id: newId(), householdId, title: title.trim(), status: 'estimating' });
-  });
+export function addBacklogTask(householdId: number, _userId: number, title: string): Promise<void> {
+  return post(`/households/${householdId}/backlog`, { title });
 }
 
-export function takeTask(taskId: number, userId: number): Promise<void> {
-  return delay(() => {
-    const b = db.backlog.find((x) => x.id === taskId);
-    if (!b || b.status !== 'open') throw new ApiError('Alguien ya tomó esta tarea.');
-    b.status = 'taken';
-    b.takenBy = userId;
-  });
+export function takeTask(taskId: number, _userId?: number): Promise<void> {
+  return post(`/backlog/${taskId}/take`);
 }
 
-export function completeTask(taskId: number, userId: number): Promise<void> {
-  return delay(() => {
-    const b = db.backlog.find((x) => x.id === taskId);
-    if (!b || b.takenBy !== userId) throw new ApiError('Solo quien tomó la tarea puede cerrarla.');
-    b.status = 'done';
-    b.doneOn = today();
-  });
+export function completeTask(taskId: number, _userId?: number): Promise<void> {
+  return post(`/backlog/${taskId}/complete`);
 }
 
 /** Puntos de la semana: rutinas marcadas + tareas del backlog terminadas. */
 export function getRanking(householdId: number): Promise<RankingRow[]> {
-  return delay(() => {
-    const ws = weekStart(today());
-    const routines = new Map(db.routines.filter((r) => r.householdId === householdId).map((r) => [r.id, r]));
-    const rows = db.memberships
-      .filter((m) => m.householdId === householdId)
-      .map((m) => {
-        const u = db.users.find((x) => x.id === m.userId)!;
-        const routinePts = db.routineChecks
-          .filter((c) => c.userId === u.id && c.periodStart >= ws && routines.has(c.routineId))
-          .reduce((s, c) => s + routines.get(c.routineId)!.points, 0);
-        const backlogPts = db.backlog
-          .filter((b) => b.householdId === householdId && b.status === 'done' && b.takenBy === u.id && (b.doneOn ?? '') >= ws)
-          .reduce((s, b) => s + (b.points ?? 0), 0);
-        return { user: { ...publicUser(u), role: m.role }, points: routinePts + backlogPts };
-      });
-    return rows.sort((a, b) => b.points - a.points);
-  });
+  return get(`/households/${householdId}/ranking`);
 }
