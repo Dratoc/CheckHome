@@ -36,3 +36,9 @@ Editar y borrar (`PATCH` y `DELETE`): `/expenses/:id` (quien lo anotó o un admi
 historial), `/routines/:id` y `/backlog/:id`. Además `GET /expenses/:id`, `GET /incomes/:id`, `GET /obligations/:id`,
 `GET /obligations/:id/payments` (historial) y `DELETE /obligation-payments/:id`, que deshace solo el último pago y
 devuelve el vencimiento un período atrás.
+
+Patrimonio (migración `0003`): `/households/:id/vehicles` (cada vehículo con sus papeles) y
+`/households/:id/properties` (cada propiedad con su dividendo, su arriendo y lo pagado y recibido en el mes), con
+`POST` para crear y `PATCH`/`DELETE` en `/vehicles/:id` y `/properties/:id`. Al borrar un vehículo o propiedad, sus
+cuentas e ingresos quedan sueltos, con su historial. Las obligaciones aceptan `vehicleId` (papeles del auto) y
+`propertyId` (dividendo), y las fuentes de ingreso, `propertyId` (arriendo).

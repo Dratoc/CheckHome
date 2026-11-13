@@ -41,6 +41,8 @@ export type IncomeSource = {
   payDay: number;
   expectedAmount: number;
   isPrivate: boolean;
+  /** Arriendo: la propiedad que lo genera */
+  propertyId?: number;
 };
 
 export type Income = {
@@ -80,6 +82,12 @@ export type Obligation = {
   /** Solo créditos: cuotas totales y pagadas */
   installmentsTotal?: number;
   installmentsPaid?: number;
+  /** Papeles del auto: el vehículo al que pertenecen */
+  vehicleId?: number;
+  vehicleName?: string;
+  /** Dividendo: la propiedad que se paga */
+  propertyId?: number;
+  propertyName?: string;
 };
 
 export type ObligationPayment = {
@@ -161,3 +169,31 @@ export type MonthSummary = {
 export type RankingRow = { user: Member; points: number };
 
 export type BacklogTaskView = BacklogTask & { votes: TaskVote[]; myVote?: number; pendingVoters: number };
+
+export type Vehicle = {
+  id: number;
+  householdId: number;
+  name: string;
+  /** Patente, sin espacios ni guiones */
+  plate?: string;
+  model?: string;
+  year?: number;
+};
+
+/** Vehículo con sus papeles (permiso, revisión técnica, SOAP, seguro). */
+export type VehicleView = Vehicle & { documents: ObligationView[] };
+
+export type Property = {
+  id: number;
+  householdId: number;
+  name: string;
+  address?: string;
+};
+
+/** Propiedad con su dividendo, su arriendo y lo pagado y recibido este mes. */
+export type PropertyView = Property & {
+  mortgages: ObligationView[];
+  rentSources: IncomeSource[];
+  rentThisMonth: number;
+  mortgagePaidThisMonth: number;
+};

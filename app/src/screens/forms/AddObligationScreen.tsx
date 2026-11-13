@@ -35,15 +35,21 @@ const saveObligation = (householdId: number, obligationId: number | undefined, i
 export function AddObligationScreen({ navigation, route }: RootScreenProps<'AddObligation'>) {
   const { household } = useHousehold();
   const obligationId = route.params?.obligationId;
+  const preset = route.params;
+  const vehicles = useQuery(() => api.listVehicles(household.id), [household.id]);
+  const properties = useQuery(() => api.listProperties(household.id), [household.id]);
   const existing = useQuery(() => (obligationId ? api.getObligation(obligationId) : Promise.resolve(undefined)), [obligationId]);
   const save = useMutation(saveObligation);
   const remove = useMutation(api.deleteObligation);
-  const [kind, setKind] = useState<ObligationKind>();
+  const [kind, setKind] = useState<ObligationKind | undefined>(preset?.kind);
+  // 0 = no ligada a ningún vehículo o propiedad
+  const [vehicleId, setVehicleId] = useState(preset?.vehicleId ?? 0);
+  const [propertyId, setPropertyId] = useState(preset?.propertyId ?? 0);
   const [name, setName] = useState('');
   const [currency, setCurrency] = useState<'CLP' | 'UF'>('CLP');
   const [rawAmount, setRawAmount] = useState('');
   const [due, setDue] = useState('');
-  const [every, setEvery] = useState<'1' | '12'>('1');
+  const [every, setEvery] = useState<'1' | '12'>(preset?.kind === 'vehicle_doc' ? '12' : '1');
   const [account, setAccount] = useState('');
   const [total, setTotal] = useState('');
   const [paid, setPaid] = useState('');
@@ -63,6 +69,8 @@ export function AddObligationScreen({ navigation, route }: RootScreenProps<'AddO
     setAccount(o.accountNumber ?? '');
     setTotal(o.installmentsTotal ? String(o.installmentsTotal) : '');
     setPaid(o.installmentsPaid != null ? String(o.installmentsPaid) : '');
+    setVehicleId(o.vehicleId ?? 0);
+    setPropertyId(o.propertyId ?? 0);
     setFilled(true);
   }, [o, filled]);
 
@@ -99,6 +107,8 @@ export function AddObligationScreen({ navigation, route }: RootScreenProps<'AddO
       accountNumber: account.trim() || undefined,
       installmentsTotal,
       installmentsPaid,
+      vehicleId: kind === 'vehicle_doc' && vehicleId ? vehicleId : undefined,
+      propertyId: kind === 'mortgage' && propertyId ? propertyId : undefined,
     });
     if (saved) navigation.goBack();
   };
@@ -116,6 +126,22 @@ export function AddObligationScreen({ navigation, route }: RootScreenProps<'AddO
   return (
     <Screen edges={['bottom']}>
       <ChoiceChips label="Tipo" options={KINDS} value={kind} onChange={pickKind} error={show('kind')} />
+      {kind === 'vehicle_doc' && (vehicles.data?.length ?? 0) > 0 && (
+        <ChoiceChips<number>
+          label="Vehículo"
+          options={[...(vehicles.data ?? []).map((v) => ({ value: v.id, label: v.name, icon: 'car-sport-outline' as const })), { value: 0, label: 'Ninguno' }]}
+          value={vehicleId}
+          onChange={setVehicleId}
+        />
+      )}
+      {kind === 'mortgage' && (properties.data?.length ?? 0) > 0 && (
+        <ChoiceChips<number>
+          label="Propiedad"
+          options={[...(properties.data ?? []).map((p) => ({ value: p.id, label: p.name, icon: 'home-outline' as const })), { value: 0, label: 'Ninguna' }]}
+          value={propertyId}
+          onChange={setPropertyId}
+        />
+      )}
       <TextField label="Nombre" value={name} onChangeText={setName} placeholder={kind ? PLACEHOLDER[kind] : 'Ej: Luz'} error={show('name')} maxLength={100} />
       {(kind === 'mortgage' || kind === 'loan') && (
         <SegmentedControl<'CLP' | 'UF'>

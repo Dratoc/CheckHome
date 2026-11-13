@@ -97,8 +97,8 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
                       <Badge label={b.label} tone={b.tone} />
                     </View>
                   }
+                  onPress={() => navigation.navigate('ObligationDetail', { obligationId: o.id, name: o.name })}
                   divider={i < upcoming.length - 1}
-                  onPress={() => navigation.navigate('Accounts')}
                 />
               );
             })

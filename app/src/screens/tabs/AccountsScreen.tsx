@@ -11,6 +11,7 @@ import {
   ProgressBar,
   QueryView,
   Screen,
+  SectionHeader,
   SegmentedControl,
   Text,
 } from '../../components';
@@ -27,7 +28,6 @@ type Section = 'movements' | 'obligations' | 'income';
 
 /** Cuentas: movimientos del hogar, cuentas por pagar y fuentes de ingreso. */
 export function AccountsScreen({ navigation }: TabScreenProps<'Accounts'>) {
-  const t = useTheme();
   const [section, setSection] = useState<Section>('movements');
 
   // Tocar un movimiento abre lo que lo originó: el gasto, el ingreso o la cuenta pagada.
@@ -59,11 +59,11 @@ export function AccountsScreen({ navigation }: TabScreenProps<'Accounts'>) {
         <IncomeSources onAdd={() => navigation.navigate('AddIncomeSource')} onReceive={(s) => navigation.navigate('AddIncome', { source: s })} />
       )}
 
-      <Card padding="md" style={{ marginTop: t.spacing.sm }}>
-        <Text variant="label">Próximamente</Text>
-        <Text variant="caption" color="textMuted">
-          Vehículos, propiedades y créditos en detalle llegan en la fase 4 del MVP.
-        </Text>
+      <SectionHeader title="Patrimonio y deudas" />
+      <Card padding="md">
+        <ListItem title="Vehículos" subtitle="Permiso, revisión técnica, SOAP y seguro" leading={<IconCircle name="car-sport-outline" tone="primary" />} onPress={() => navigation.navigate('Vehicles')} divider />
+        <ListItem title="Propiedades" subtitle="Dividendo pagado y arriendo recibido" leading={<IconCircle name="home-outline" tone="primary" />} onPress={() => navigation.navigate('Properties')} divider />
+        <ListItem title="Créditos" subtitle="Cuotas pagadas y cuánto falta" leading={<IconCircle name="card-outline" tone="primary" />} onPress={() => navigation.navigate('Loans')} />
       </Card>
     </Screen>
   );

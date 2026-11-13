@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Button, Checkbox, Screen, Text, TextField } from '../../components';
-import { useMutation } from '../../hooks/useQuery';
+import { Button, Checkbox, ChoiceChips, Screen, Text, TextField } from '../../components';
+import { useMutation, useQuery } from '../../hooks/useQuery';
 import type { RootScreenProps } from '../../navigation/types';
 import * as api from '../../services/api';
 import { useHousehold } from '../../state/SessionProvider';
@@ -20,6 +20,9 @@ export function AddIncomeSourceScreen({ navigation, route }: RootScreenProps<'Ad
   const [day, setDay] = useState(source ? String(source.payDay) : '');
   const [raw, setRaw] = useState(source?.expectedAmount ? String(source.expectedAmount) : '');
   const [isPrivate, setPrivate] = useState(source?.isPrivate ?? false);
+  const properties = useQuery(() => api.listProperties(household.id), [household.id]);
+  // 0 = no es arriendo de una propiedad
+  const [propertyId, setPropertyId] = useState(source?.propertyId ?? route.params?.propertyId ?? 0);
   const [submitted, setSubmitted] = useState(false);
 
   const payDay = Number(day);
@@ -32,7 +35,7 @@ export function AddIncomeSourceScreen({ navigation, route }: RootScreenProps<'Ad
   const submit = async () => {
     setSubmitted(true);
     if (errors.name || errors.day) return;
-    const s = await save.run(household.id, source?.id, { name: name.trim(), payDay, expectedAmount, isPrivate });
+    const s = await save.run(household.id, source?.id, { name: name.trim(), payDay, expectedAmount, isPrivate, propertyId: propertyId || undefined });
     if (s) navigation.goBack();
   };
 
@@ -47,6 +50,14 @@ export function AddIncomeSourceScreen({ navigation, route }: RootScreenProps<'Ad
       <TextField label="Nombre" value={name} onChangeText={setName} placeholder="Ej: Sueldo, Arriendo depto" error={submitted ? errors.name : undefined} maxLength={100} autoFocus={!source} />
       <TextField label="Día del mes en que llega" value={day} onChangeText={(v) => setDay(v.replace(/\D/g, '').slice(0, 2))} keyboardType="number-pad" placeholder="1" error={submitted ? errors.day : undefined} />
       <TextField label="Monto habitual" prefix="$" value={showClp(expectedAmount)} onChangeText={setRaw} keyboardType="number-pad" placeholder="0" hint="Se usa como sugerencia al anotar cada pago." />
+      {(properties.data?.length ?? 0) > 0 && (
+        <ChoiceChips<number>
+          label="¿Es arriendo de una propiedad?"
+          options={[{ value: 0, label: 'No' }, ...(properties.data ?? []).map((p) => ({ value: p.id, label: p.name, icon: 'home-outline' as const }))]}
+          value={propertyId}
+          onChange={setPropertyId}
+        />
+      )}
       <Checkbox label="Privado" hint="Solo tú ves esta fuente y sus pagos." checked={isPrivate} onChange={setPrivate} />
       {(save.error || remove.error) && (
         <Text color="danger" accessibilityRole="alert">

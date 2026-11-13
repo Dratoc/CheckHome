@@ -13,9 +13,13 @@ import type {
   ObligationKind,
   ObligationPayment,
   ObligationView,
+  Property,
+  PropertyView,
   RankingRow,
   Routine,
   User,
+  Vehicle,
+  VehicleView,
 } from './types';
 
 /**
@@ -158,6 +162,8 @@ export type ObligationInput = {
   accountNumber?: string;
   installmentsTotal?: number;
   installmentsPaid?: number;
+  vehicleId?: number;
+  propertyId?: number;
 };
 
 export function createObligation(householdId: number, input: ObligationInput): Promise<ObligationView> {
@@ -198,7 +204,7 @@ export function listIncomeSources(householdId: number, _userId?: number): Promis
   return get(`/households/${householdId}/income-sources`);
 }
 
-export type IncomeSourceInput = { name: string; payDay: number; expectedAmount: number; isPrivate: boolean };
+export type IncomeSourceInput = { name: string; payDay: number; expectedAmount: number; isPrivate: boolean; propertyId?: number };
 
 export function createIncomeSource(householdId: number, input: IncomeSourceInput): Promise<IncomeSource> {
   return post(`/households/${householdId}/income-sources`, input);
@@ -250,6 +256,46 @@ export function updateExpense(expenseId: number, input: ExpenseInput & { spentOn
 
 export function deleteExpense(expenseId: number) {
   return del(`/expenses/${expenseId}`);
+}
+
+// ---------- Vehículos y propiedades ----------
+
+export type VehicleInput = { name: string; plate?: string; model?: string; year?: number };
+
+export function listVehicles(householdId: number): Promise<VehicleView[]> {
+  return get(`/households/${householdId}/vehicles`);
+}
+
+export function createVehicle(householdId: number, input: VehicleInput): Promise<Vehicle> {
+  return post(`/households/${householdId}/vehicles`, input);
+}
+
+export function updateVehicle(vehicleId: number, input: VehicleInput): Promise<Vehicle> {
+  return patch(`/vehicles/${vehicleId}`, input);
+}
+
+/** Borra el vehículo; sus papeles quedan como cuentas sueltas. */
+export function deleteVehicle(vehicleId: number) {
+  return del(`/vehicles/${vehicleId}`);
+}
+
+export type PropertyInput = { name: string; address?: string };
+
+export function listProperties(householdId: number): Promise<PropertyView[]> {
+  return get(`/households/${householdId}/properties`);
+}
+
+export function createProperty(householdId: number, input: PropertyInput): Promise<Property> {
+  return post(`/households/${householdId}/properties`, input);
+}
+
+export function updateProperty(propertyId: number, input: PropertyInput): Promise<Property> {
+  return patch(`/properties/${propertyId}`, input);
+}
+
+/** Borra la propiedad; su dividendo y arriendo quedan como cuentas e ingresos sueltos. */
+export function deleteProperty(propertyId: number) {
+  return del(`/properties/${propertyId}`);
 }
 
 // ---------- Tareas ----------

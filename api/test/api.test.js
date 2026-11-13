@@ -212,3 +212,56 @@ test('editar, borrar e historial de pagos', { skip: !cs && 'sin TEST_SQL_CONNECT
   assert.equal((await call('DELETE', `/backlog/${task.id}`, null, tb)).status, 204);
   assert.equal((await call('GET', `/households/${hid}/backlog`, null, ta)).body.length, 0);
 });
+
+test('vehículos con papeles y propiedades con dividendo y arriendo', { skip: !cs && 'sin TEST_SQL_CONNECTION_STRING' }, async () => {
+  const sfx = 'v' + Date.now().toString(36);
+  const a = (await call('POST', '/auth/register', { email: `a${sfx}@x.cl`, username: `ana${sfx}`, displayName: 'Ana', password: 'secreta123' })).body;
+  const b = (await call('POST', '/auth/register', { email: `b${sfx}@x.cl`, username: `beto${sfx}`, displayName: 'Beto', password: 'secreta123' })).body;
+  const ta = a.token;
+  const tb = b.token;
+  const hh = (await call('POST', '/households', { name: 'Casa' }, ta)).body;
+  const hid = hh.id;
+  await call('POST', '/households/join', { code: hh.inviteCode }, tb);
+  const other = (await call('POST', '/households', { name: 'Otra' }, tb)).body;
+
+  // Vehículo con dos papeles.
+  const car = await call('POST', `/households/${hid}/vehicles`, { name: 'Auto', plate: 'ab-cd 12', model: 'Toyota Yaris', year: 2019 }, ta);
+  assert.equal(car.status, 201, JSON.stringify(car.body));
+  assert.equal(car.body.plate, 'ABCD12');
+  assert.equal((await call('POST', `/households/${hid}/vehicles`, { name: 'X', year: 1800 }, ta)).status, 400);
+  const permiso = await call('POST', `/households/${hid}/obligations`, { kind: 'vehicle_doc', name: 'Permiso de circulación', amount: 180000, nextDueOn: '2027-03-31', everyMonths: 12, vehicleId: car.body.id }, tb);
+  assert.equal(permiso.status, 201, JSON.stringify(permiso.body));
+  assert.equal(permiso.body.vehicleName, 'Auto');
+  await call('POST', `/households/${hid}/obligations`, { kind: 'vehicle_doc', name: 'SOAP', amount: 9000, nextDueOn: '2027-03-31', everyMonths: 12, vehicleId: car.body.id }, ta);
+  const foreignCar = (await call('POST', `/households/${other.id}/vehicles`, { name: 'Ajeno' }, tb)).body;
+  assert.equal((await call('POST', `/households/${hid}/obligations`, { kind: 'vehicle_doc', name: 'SOAP', amount: 1, nextDueOn: '2027-03-31', vehicleId: foreignCar.id }, tb)).status, 400, 'vehículo de otro hogar');
+  let vehicles = (await call('GET', `/households/${hid}/vehicles`, null, tb)).body;
+  assert.equal(vehicles.length, 1);
+  assert.deepEqual(vehicles[0].documents.map((d) => d.name).sort(), ['Permiso de circulación', 'SOAP']);
+  assert.equal((await call('PATCH', `/vehicles/${car.body.id}`, { name: 'Yaris', plate: 'ABCD12', model: 'Toyota Yaris', year: 2019 }, tb)).body.name, 'Yaris');
+  assert.equal((await call('DELETE', `/vehicles/${car.body.id}`, null, tb)).status, 204);
+  const loose = (await call('GET', `/obligations/${permiso.body.id}`, null, ta)).body;
+  assert.equal(loose.vehicleId, undefined, 'el papel queda como cuenta suelta');
+  assert.equal(loose.name, 'Permiso de circulación');
+
+  // Propiedad con dividendo en pesos y arriendo privado de Ana.
+  const depto = (await call('POST', `/households/${hid}/properties`, { name: 'Depto', address: 'Calle 1' }, ta)).body;
+  const div = (await call('POST', `/households/${hid}/obligations`, { kind: 'mortgage', name: 'Dividendo depto', amount: 400000, nextDueOn: '2026-01-05', propertyId: depto.id }, ta)).body;
+  assert.equal(div.propertyName, 'Depto');
+  await call('POST', `/obligations/${div.id}/pay`, {}, ta);
+  const rent = (await call('POST', `/households/${hid}/income-sources`, { name: 'Arriendo depto', payDay: 5, expectedAmount: 550000, isPrivate: true, propertyId: depto.id }, ta)).body;
+  assert.equal(rent.propertyId, depto.id);
+  await call('POST', `/income-sources/${rent.id}/incomes`, { amount: 550000 }, ta);
+  const [pa] = (await call('GET', `/households/${hid}/properties`, null, ta)).body;
+  assert.equal(pa.mortgages.length, 1);
+  assert.equal(pa.rentSources.length, 1);
+  assert.equal(pa.rentThisMonth, 550000);
+  assert.equal(pa.mortgagePaidThisMonth, 400000);
+  const [pb] = (await call('GET', `/households/${hid}/properties`, null, tb)).body;
+  assert.equal(pb.rentSources.length, 0, 'el arriendo privado no se ve');
+  assert.equal(pb.rentThisMonth, 0);
+  assert.equal((await call('PATCH', `/properties/${depto.id}`, { name: 'Depto Ñuñoa' }, tb)).body.name, 'Depto Ñuñoa');
+  assert.equal((await call('DELETE', `/properties/${depto.id}`, null, tb)).status, 204);
+  assert.equal((await call('GET', `/obligations/${div.id}`, null, ta)).body.propertyId, undefined);
+  assert.equal((await call('GET', `/households/${hid}/properties`, null, ta)).body.length, 0);
+});

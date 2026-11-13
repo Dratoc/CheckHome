@@ -18,6 +18,11 @@ import { AddRoutineScreen } from '../screens/forms/AddRoutineScreen';
 import { EditIncomeScreen } from '../screens/forms/EditIncomeScreen';
 import { EditTaskScreen } from '../screens/forms/EditTaskScreen';
 import { ObligationDetailScreen } from '../screens/ObligationDetailScreen';
+import { AddPropertyScreen } from '../screens/forms/AddPropertyScreen';
+import { AddVehicleScreen } from '../screens/forms/AddVehicleScreen';
+import { LoansScreen } from '../screens/assets/LoansScreen';
+import { PropertiesScreen } from '../screens/assets/PropertiesScreen';
+import { VehiclesScreen } from '../screens/assets/VehiclesScreen';
 import { MainTabs } from './MainTabs';
 import type { RootStackParamList } from './types';
 
@@ -87,6 +92,11 @@ export function RootNavigator() {
             <Stack.Screen name="EditIncome" component={EditIncomeScreen} options={{ title: 'Editar ingreso', presentation: 'modal' }} />
             <Stack.Screen name="AddRoutine" component={AddRoutineScreen} options={({ route }) => ({ title: route.params?.routine ? 'Editar rutina' : 'Nueva rutina', presentation: 'modal' })} />
             <Stack.Screen name="EditTask" component={EditTaskScreen} options={{ title: 'Editar tarea', presentation: 'modal' }} />
+            <Stack.Screen name="Vehicles" component={VehiclesScreen} options={{ title: 'Vehículos' }} />
+            <Stack.Screen name="AddVehicle" component={AddVehicleScreen} options={({ route }) => ({ title: route.params?.vehicle ? 'Editar vehículo' : 'Nuevo vehículo', presentation: 'modal' })} />
+            <Stack.Screen name="Properties" component={PropertiesScreen} options={{ title: 'Propiedades' }} />
+            <Stack.Screen name="AddProperty" component={AddPropertyScreen} options={({ route }) => ({ title: route.params?.property ? 'Editar propiedad' : 'Nueva propiedad', presentation: 'modal' })} />
+            <Stack.Screen name="Loans" component={LoansScreen} options={{ title: 'Créditos' }} />
             <Stack.Screen name="DesignPreview" component={DesignPreview} options={{ title: 'Sistema de diseño' }} />
           </Stack.Group>
         )}
