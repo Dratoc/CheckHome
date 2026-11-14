@@ -22,6 +22,8 @@ import { useMutation, useQuery } from '../../hooks/useQuery';
 import { useRoutineToggle } from '../../hooks/useRoutineToggle';
 import { ExpenseFab } from '../../navigation/ExpenseFab';
 import * as api from '../../services/api';
+import type { RoutineWithCheck } from '../../services/api';
+import { repeatLabel } from '../../utils/weekdays';
 import type { BacklogTaskView, Member } from '../../services/types';
 import { useHousehold } from '../../state/SessionProvider';
 import { useTheme } from '../../theme';
@@ -79,13 +81,25 @@ function Today() {
         </Card>
       }
     >
-      {(rows) => {
+      {(all) => {
+        const rows = all.filter((r) => r.status === 'active' && r.dueToday);
+        const pending = all.filter((r) => r.status === 'estimating').length;
         const groups = [
           { title: 'Hoy', items: rows.filter((r) => r.frequency === 'daily') },
           { title: 'Esta semana', items: rows.filter((r) => r.frequency === 'weekly') },
         ].filter((g) => g.items.length > 0);
         return (
           <>
+            {pending > 0 && (
+              <Text variant="caption" color="textMuted">
+                {pending === 1 ? 'Hay 1 rutina en votación' : `Hay ${pending} rutinas en votación`}: aparece aquí cuando la valoren todos (pestaña Rutinas).
+              </Text>
+            )}
+            {groups.length === 0 && (
+              <Card>
+                <EmptyState title="Hoy no toca nada" message="Ninguna rutina habilitada se repite hoy." />
+              </Card>
+            )}
             {groups.map((g) => {
               const done = g.items.filter(toggle.isChecked).length;
               return (
@@ -103,7 +117,7 @@ function Today() {
                       <Checkbox
                         key={r.id}
                         label={r.name}
-                        hint={toggle.isChecked(r) && by ? `Lo hizo ${by} · +${pts(r.points)}` : `+${pts(r.points)}`}
+                        hint={toggle.isChecked(r) && by ? `Lo hizo ${by} · +${pts(r.points ?? 0)}` : `+${pts(r.points ?? 0)}`}
                         checked={toggle.isChecked(r)}
                         onChange={() => toggle.toggle(r)}
                       />
@@ -121,34 +135,83 @@ function Today() {
 }
 
 function Routines() {
+  const t = useTheme();
   const { household } = useHousehold();
   const navigation = useNavigation();
   const query = useQuery(() => api.listRoutines(household.id), [household.id]);
+  const vote = useMutation(async (routineId: number, points: number) => {
+    await api.voteRoutine(routineId, points);
+    await query.reload();
+  });
   const add = () => navigation.navigate('AddRoutine');
+  const every = (r: RoutineWithCheck) => repeatLabel(r);
   return (
-    <Card padding="md">
+    <>
       <QueryView
         query={query}
         isEmpty={(d) => d.length === 0}
-        empty={<EmptyState title="Sin rutinas" message="Define una vez lo que se hace cada día o cada semana." action="Agregar rutina" onAction={add} />}
+        empty={
+          <Card padding="md">
+            <EmptyState title="Sin rutinas" message="Define una vez lo que se hace cada día o cada semana." action="Agregar rutina" onAction={add} />
+          </Card>
+        }
       >
-        {(rows) => (
-          <>
-            {rows.map((r) => (
-              <ListItem
-                key={r.id}
-                title={r.name}
-                subtitle={`${r.frequency === 'daily' ? 'Todos los días' : 'Una vez por semana'} · Toca para editar`}
-                trailing={<Badge label={`+${pts(r.points)}`} tone="points" />}
-                onPress={() => navigation.navigate('AddRoutine', { routine: r })}
-                divider
-              />
-            ))}
-            <Button label="Agregar rutina" variant="ghost" block onPress={add} />
-          </>
-        )}
+        {(rows) => {
+          const estimating = rows.filter((r) => r.status === 'estimating');
+          const active = rows.filter((r) => r.status === 'active');
+          return (
+            <>
+              {estimating.length > 0 && <SectionHeader title="Por valorar" />}
+              {estimating.map((r) => (
+                <Card key={r.id} padding="md">
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.sm }}>
+                    <View style={{ flex: 1 }}>
+                      <Text variant="bodyStrong">{r.name}</Text>
+                      <Text variant="caption" color="textMuted">
+                        {every(r)}
+                      </Text>
+                    </View>
+                    <Pressable
+                      onPress={() => navigation.navigate('AddRoutine', { routine: r })}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Editar ${r.name}`}
+                      hitSlop={8}
+                      style={({ pressed }) => ({ padding: t.spacing.xs, opacity: pressed ? 0.6 : 1 })}
+                    >
+                      <Ionicons name="create-outline" size={20} color={t.colors.textMuted} />
+                    </Pressable>
+                  </View>
+                  <Text variant="caption" color="textMuted">
+                    {r.myVote ? `Votaste ${r.myVote}. ` : '¿Cuántos puntos vale? '}
+                    {r.pendingVoters === 1 ? 'Falta 1 voto' : `Faltan ${r.pendingVoters} votos`}; se habilita con el más alto.
+                  </Text>
+                  <View style={{ flexDirection: 'row', gap: t.spacing.sm, flexWrap: 'wrap' }}>
+                    {api.FIBONACCI.map((n) => (
+                      <VoteChip key={n} value={n} selected={r.myVote === n} onPress={() => vote.run(r.id, n)} />
+                    ))}
+                  </View>
+                </Card>
+              ))}
+              {vote.error && <Text color="danger">{vote.error}</Text>}
+              {estimating.length > 0 && active.length > 0 && <SectionHeader title="Habilitadas" />}
+              <Card padding="md">
+                {active.map((r) => (
+                  <ListItem
+                    key={r.id}
+                    title={r.name}
+                    subtitle={`${every(r)} · Toca para editar`}
+                    trailing={<Badge label={`+${pts(r.points ?? 0)}`} tone="points" />}
+                    onPress={() => navigation.navigate('AddRoutine', { routine: r })}
+                    divider
+                  />
+                ))}
+                <Button label="Agregar rutina" variant="ghost" block onPress={add} />
+              </Card>
+            </>
+          );
+        }}
       </QueryView>
-    </Card>
+    </>
   );
 }
 
