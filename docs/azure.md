@@ -36,7 +36,8 @@ TAGS="proyecto=app-hogar entorno=dev"
 2. Grupo y presupuesto: `az group create -n $RG -l brazilsouth --tags $TAGS` y `bash infra/create-budget.sh`.
 3. SQL:
    ```bash
-   SQLPASS=$(openssl rand -base64 24)   # se queda en la terminal, no se imprime
+   # Azure exige mayúsculas, minúsculas, números y símbolo; base64 solo a veces cumple, por eso se agrega un sufijo fijo
+   SQLPASS="$(openssl rand -base64 24 | tr -d '/+=')Aa1!"   # se queda en la terminal, no se imprime
    az sql server create -g $RG -n $SQL -l $LOC --admin-user checkhome_admin --admin-password "$SQLPASS"
    az sql db create -g $RG -s $SQL -n $DB --edition GeneralPurpose --compute-model Serverless \
      --family Gen5 --capacity 2 --use-free-limit --free-limit-exhaustion-behavior AutoPause \
@@ -60,7 +61,7 @@ TAGS="proyecto=app-hogar entorno=dev"
 ## Estado actual (13 nov 2026)
 
 - Static Web App `swa-checkhome-e20fee` (Free, Central US): https://purple-coast-025bebe10.8.azurestaticapps.net/api
-- SQL `sql-checkhome-e20fee` / base `checkhome` (oferta gratuita, AutoPause), migraciones 0001, 0002 y 0003 (14 nov). La clave de `checkhome_admin` no se guarda: para otra migración se resetea con `az sql server update --admin-password`.
+- SQL `sql-checkhome-e20fee` / base `checkhome` (oferta gratuita, AutoPause), migraciones 0001 a 0004 (0004 aplicada el 14 nov: medios de pago y cierre del mes). La clave de `checkhome_admin` no se guarda: para otra migración se resetea con `az sql server update --admin-password`.
 - Firewall: solo `azure-services`. Presupuesto `presupuesto-checkhome` USD 1.
 - Probado: `/health` 200, `/uf` 200 (mindicador), registro 201, `/households` 200 con `X-CheckHome-Token`.
 
