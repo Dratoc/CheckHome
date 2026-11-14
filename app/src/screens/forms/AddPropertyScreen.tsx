@@ -29,7 +29,7 @@ export function AddPropertyScreen({ navigation, route }: RootScreenProps<'AddPro
 
   const onDelete = async () => {
     if (!property) return;
-    const ok = await confirmDanger(`¿Eliminar ${property.name}?`, 'Su dividendo y su arriendo no se borran: quedan como cuentas e ingresos sueltos, con su historial.');
+    const ok = await confirmDanger(`¿Eliminar ${property.name}?`, 'Se borran sus documentos adjuntos. Su dividendo y su arriendo no se borran: quedan como cuentas e ingresos sueltos, con su historial.');
     if (ok && (await remove.run(property.id))) navigation.goBack();
   };
 
