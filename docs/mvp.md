@@ -10,7 +10,7 @@ vencimiento**, y **repartir las tareas de la casa de forma visible y justa**.
 
 | Área | Módulo | Qué resuelve |
 | --- | --- | --- |
-| Núcleo | Usuarios y hogares | Cuenta propia con correo validado; un usuario puede estar en varios hogares ("salas") y cambiar entre ellos |
+| Núcleo | Usuarios y hogares | Cuenta propia (correo y nombre de usuario); se entra a un hogar con un código de invitación; un usuario puede estar en varios hogares ("salas") y cambiar entre ellos |
 | Cuentas | Ingresos | Fuentes (sueldo, arriendo, venta) definidas una vez con su día de pago; cada pago se anota a mano en pesos; privado o compartido |
 | Cuentas | Gastos diarios | Anotar en segundos lo gastado fuera de los cargos fijos; siempre visible para el hogar |
 | Cuentas | Gastos fijos | Servicios y suscripciones: vencimiento, número de cuenta, último pago, si van al día |
@@ -37,7 +37,7 @@ presupuestado, balance y ranking de puntos. Montos en `DECIMAL(12,2)`, montos en
 
 ## Pantallas
 
-Acceso (registro, elegir hogar) y cuatro pestañas: **Inicio** (balance, vencimientos, checklist de hoy),
+Acceso (registro, crear hogar o unirse con código, elegir hogar) y cuatro pestañas: **Inicio** (balance, vencimientos, checklist de hoy),
 **Cuentas** (movimientos, fuentes de ingreso, obligaciones, vehículos, propiedades), **Tareas** (hoy, rutinas,
 backlog, estimar, ranking) y **Hogar** (miembros, invitación, cambiar de hogar). Botón global "+ Gasto".
 
@@ -56,7 +56,7 @@ Después del MVP: métricas y gráficos, notificaciones de vencimiento, fotos de
 | # | Tema | Decisión |
 | --- | --- | --- |
 | 1 | Conexión | La app habla por HTTPS con una API; la cadena de conexión vive solo en Azure ([ADR 0001](adr/0001-api-en-app-service-f1.md)) |
-| 2 | Inicio de sesión | Registro con correo validado y nombre de usuario; hogares como salas |
+| 2 | Inicio de sesión | Registro con correo y nombre de usuario, sin validar el correo por ahora; se entra a un hogar con código de invitación; hogares como salas |
 | 3 | UF | En UF cuando aplica; el pago guarda pesos y valor UF ([ADR 0002](adr/0002-valor-uf-mindicador.md)) |
 | 4 | Ingresos | Fuente definida una vez; cada pago manual en pesos |
 | 5 | Rutinas | Dan puntos; se definen una vez y se repiten |
@@ -64,5 +64,5 @@ Después del MVP: métricas y gráficos, notificaciones de vencimiento, fotos de
 | 7 | Privacidad | Ingresos pueden ser privados; gastos siempre compartidos |
 | 8 | Fin de la prueba Azure (~13 dic 2026) | Se decide al terminar el período |
 
-Pendiente: proveedor del correo de validación (Brevo gratis, Gmail SMTP o postergarlo).
+Postergado: la validación del correo queda para después del MVP; mientras tanto, el acceso a cada hogar se controla con su código de invitación.
 Token de sesión: JWT firmado por la API, clave en la configuración de App Service, 30 días.
