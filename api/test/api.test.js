@@ -265,3 +265,62 @@ test('vehículos con papeles y propiedades con dividendo y arriendo', { skip: !c
   assert.equal((await call('GET', `/obligations/${div.id}`, null, ta)).body.propertyId, undefined);
   assert.equal((await call('GET', `/households/${hid}/properties`, null, ta)).body.length, 0);
 });
+
+test('documentos adjuntos de vehículos y propiedades', { skip: !cs && 'sin TEST_SQL_CONNECTION_STRING' }, async () => {
+  const sfx = 'd' + Date.now().toString(36);
+  const a = (await call('POST', '/auth/register', { email: `a${sfx}@x.cl`, username: `ana${sfx}`, displayName: 'Ana', password: 'secreta123' })).body;
+  const c = (await call('POST', '/auth/register', { email: `c${sfx}@x.cl`, username: `caro${sfx}`, displayName: 'Caro', password: 'secreta123' })).body;
+  const ta = a.token;
+  const hid = (await call('POST', '/households', { name: 'Casa' }, ta)).body.id;
+  const car = (await call('POST', `/households/${hid}/vehicles`, { name: 'Auto' }, ta)).body;
+  const rt = (await call('POST', `/households/${hid}/obligations`, { kind: 'vehicle_doc', name: 'Revisión técnica', amount: 30000, nextDueOn: '2027-05-31', everyMonths: 12, vehicleId: car.id }, ta)).body;
+  const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(2000, 7)]);
+
+  // Copia digital de la revisión técnica, ligada al papel.
+  const up = await call('POST', `/households/${hid}/attachments`, { obligationId: rt.id, kind: 'technical_review', title: 'Certificado revisión técnica', expiresOn: '2027-05-31', fileName: 'revisión.pdf', contentType: 'application/pdf', data: pdf.toString('base64') }, ta);
+  assert.equal(up.status, 201, JSON.stringify(up.body));
+  assert.equal(up.body.vehicleId, car.id);
+  assert.equal(up.body.obligationId, rt.id);
+  assert.equal(up.body.sizeBytes, pdf.length);
+  assert.equal(up.body.status, 'ok');
+
+  // Validaciones: tipo falso, archivo disfrazado, sin dueño, otro hogar, muy grande.
+  const bad = (body) => call('POST', `/households/${hid}/attachments`, { kind: 'other', title: 'X', fileName: 'x', contentType: 'application/pdf', data: pdf.toString('base64'), vehicleId: car.id, ...body }, ta);
+  assert.equal((await bad({ contentType: 'text/html' })).status, 400);
+  assert.equal((await bad({ contentType: 'image/png' })).status, 400, 'un PDF no pasa por PNG');
+  assert.equal((await bad({ vehicleId: undefined })).status, 400);
+  assert.equal((await bad({ kind: 'malware' })).status, 400);
+  assert.equal((await bad({ data: Buffer.concat([pdf, Buffer.alloc(4 * 1024 * 1024)]).toString('base64') })).status, 400);
+  assert.equal((await call('POST', `/households/${hid}/attachments`, { kind: 'other', title: 'X', contentType: 'application/pdf', data: pdf.toString('base64'), vehicleId: car.id }, c.token)).status, 403);
+
+  const [v] = (await call('GET', `/households/${hid}/vehicles`, null, ta)).body;
+  assert.equal(v.attachments.length, 1);
+  assert.equal(v.attachments[0].title, 'Certificado revisión técnica');
+
+  // Abrir con enlace corto: funciona sin sesión, falla con token de otro documento o inventado.
+  assert.equal((await call('POST', `/attachments/${up.body.id}/link`, {}, c.token)).status, 403);
+  const link = (await call('POST', `/attachments/${up.body.id}/link`, {}, ta)).body;
+  const file = await fetch(base + link.path);
+  assert.equal(file.status, 200);
+  assert.equal(file.headers.get('content-type'), 'application/pdf');
+  assert.ok(Buffer.from(await file.arrayBuffer()).equals(pdf));
+  assert.equal((await fetch(`${base}/attachments/${up.body.id}/file?t=nada`)).status, 403);
+  assert.equal((await fetch(`${base}/attachments/${up.body.id}/file`, { headers: { authorization: `Bearer ${ta}` } })).status, 403, 'el token de sesión no sirve de enlace');
+
+  // Foto de la escritura en una propiedad, sin vencimiento.
+  const casa = (await call('POST', `/households/${hid}/properties`, { name: 'Casa' }, ta)).body;
+  const jpg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+  const deed = await call('POST', `/households/${hid}/attachments`, { propertyId: casa.id, kind: 'deed', title: 'Escritura', fileName: 'escritura.jpg', contentType: 'image/jpeg', data: `data:image/jpeg;base64,${jpg.toString('base64')}` }, ta);
+  assert.equal(deed.status, 201, JSON.stringify(deed.body));
+  assert.equal(deed.body.status, 'none');
+  const edited = await call('PATCH', `/attachments/${deed.body.id}`, { kind: 'deed', title: 'Escritura casa', expiresOn: '2020-01-01' }, ta);
+  assert.equal(edited.body.status, 'expired');
+  assert.equal((await call('GET', `/households/${hid}/properties`, null, ta)).body[0].attachments.length, 1);
+
+  // Borrar el papel deja el documento en el auto; borrar el auto borra sus documentos.
+  assert.equal((await call('DELETE', `/obligations/${rt.id}`, null, ta)).status, 204);
+  assert.equal((await call('GET', `/households/${hid}/attachments`, null, ta)).body.find((x) => x.id === up.body.id).obligationId, undefined);
+  assert.equal((await call('DELETE', `/vehicles/${car.id}`, null, ta)).status, 204);
+  assert.equal((await call('DELETE', `/attachments/${deed.body.id}`, null, ta)).status, 204);
+  assert.equal((await call('GET', `/households/${hid}/attachments`, null, ta)).body.length, 0);
+});

@@ -36,7 +36,7 @@ export function AddVehicleScreen({ navigation, route }: RootScreenProps<'AddVehi
 
   const onDelete = async () => {
     if (!vehicle) return;
-    const ok = await confirmDanger(`¿Eliminar ${vehicle.name}?`, 'Sus papeles no se borran: quedan en "Por pagar" como cuentas sueltas, con su historial.');
+    const ok = await confirmDanger(`¿Eliminar ${vehicle.name}?`, 'Se borran sus documentos adjuntos. Sus papeles no se borran: quedan en "Por pagar" como cuentas sueltas, con su historial.');
     if (ok && (await remove.run(vehicle.id))) navigation.goBack();
   };
 

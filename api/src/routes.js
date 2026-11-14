@@ -1,8 +1,8 @@
 import { randomInt } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { Router } from 'express';
-import { requireAuth, signToken } from './auth.js';
-import { date, query, transaction } from './db.js';
+import { requireAuth, signFileToken, signToken, verifyFileToken } from './auth.js';
+import { date, query, sql, transaction } from './db.js';
 import { addMonths, daysUntil, formatShortDate, fromSql, isIsoDate, monthStart, nextMonthStart, today, weekStart } from './dates.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { getUf } from './uf.js';
@@ -151,6 +151,28 @@ router.post(
       throw badRequest('Correo o contraseña incorrectos.');
     }
     res.json(session(row));
+  }),
+);
+
+// Abre el archivo de un documento con el enlace corto de POST /attachments/:id/link (sin encabezado de sesión).
+router.get(
+  '/attachments/:id/file',
+  h(async (req, res) => {
+    const aid = idParam(req);
+    if (!verifyFileToken(req.query.t, aid)) throw forbidden('El enlace venció. Vuelve a abrir el documento desde la app.');
+    const [row] = await query(
+      'SELECT a.file_name, a.content_type, f.content FROM dbo.attachments a JOIN dbo.attachment_files f ON f.attachment_id = a.id WHERE a.id = @a',
+      { a: aid },
+    );
+    if (!row) throw notFound('No encontramos ese documento.');
+    const ascii = row.file_name.normalize('NFD').replace(/[^\x20-\x7e]/g, '').replace(/["\\]/g, '') || 'documento';
+    res.set({
+      'Content-Type': row.content_type,
+      'Content-Disposition': `inline; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(row.file_name)}`,
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    res.send(row.content);
   }),
 );
 
@@ -384,12 +406,13 @@ router.patch(
   }),
 );
 
-/** Borra la cuenta junto con su historial de pagos. */
+/** Borra la cuenta junto con su historial de pagos. Sus documentos adjuntos quedan en el vehículo o propiedad. */
 router.delete(
   '/obligations/:id',
   h(async (req, res) => {
     const o = await obligationOf(req);
     await transaction(async (tx) => {
+      await query('UPDATE dbo.attachments SET obligation_id = NULL WHERE obligation_id = @o', { o: o.id }, tx);
       await query('DELETE FROM dbo.obligation_payments WHERE obligation_id = @o', { o: o.id }, tx);
       await query('DELETE FROM dbo.obligations WHERE id = @o', { o: o.id }, tx);
     });
@@ -846,7 +869,14 @@ router.get(
     await requireMember(hid, req.userId);
     const vehicles = await query('SELECT * FROM dbo.vehicles WHERE household_id = @h ORDER BY id', { h: hid });
     const obligations = await obligationViews(hid);
-    res.json(vehicles.map((v) => ({ ...vehicleRow(v), documents: obligations.filter((o) => o.vehicleId === v.id) })));
+    const files = await attachmentViews(hid);
+    res.json(
+      vehicles.map((v) => ({
+        ...vehicleRow(v),
+        documents: obligations.filter((o) => o.vehicleId === v.id),
+        attachments: files.filter((a) => a.vehicleId === v.id),
+      })),
+    );
   }),
 );
 
@@ -859,7 +889,7 @@ router.post(
       h: hid,
       ...vehicleInput(req.body),
     });
-    res.status(201).json({ ...vehicleRow(row), documents: [] });
+    res.status(201).json({ ...vehicleRow(row), documents: [], attachments: [] });
   }),
 );
 
@@ -875,12 +905,13 @@ router.patch(
   }),
 );
 
-/** Borra el vehículo. Sus papeles quedan como cuentas sueltas, con su historial. */
+/** Borra el vehículo y sus documentos adjuntos. Sus papeles quedan como cuentas sueltas, con su historial. */
 router.delete(
   '/vehicles/:id',
   h(async (req, res) => {
     const v = await vehicleOf(req);
     await transaction(async (tx) => {
+      await query('DELETE FROM dbo.attachments WHERE vehicle_id = @v', { v: v.id }, tx);
       await query('UPDATE dbo.obligations SET vehicle_id = NULL WHERE vehicle_id = @v', { v: v.id }, tx);
       await query('DELETE FROM dbo.vehicles WHERE id = @v', { v: v.id }, tx);
     });
@@ -915,6 +946,7 @@ router.get(
     const p = { h: hid, u: req.userId, from: date(monthStart(t)), to: date(nextMonthStart(t)) };
     const props = await query('SELECT * FROM dbo.properties WHERE household_id = @h ORDER BY id', p);
     const obligations = await obligationViews(hid);
+    const files = await attachmentViews(hid);
     const sources = await query('SELECT * FROM dbo.income_sources WHERE household_id = @h AND property_id IS NOT NULL AND (is_private = 0 OR user_id = @u)', p);
     const rent = await query(
       `SELECT s.property_id, SUM(i.amount) AS s FROM dbo.incomes i JOIN dbo.income_sources s ON s.id = i.source_id
@@ -932,6 +964,7 @@ router.get(
       props.map((r) => ({
         ...propertyRow(r),
         mortgages: obligations.filter((o) => o.propertyId === r.id),
+        attachments: files.filter((a) => a.propertyId === r.id),
         rentSources: sources.filter((s) => s.property_id === r.id).map(incomeSourceRow),
         rentThisMonth: Number(rent.find((x) => x.property_id === r.id)?.s ?? 0),
         mortgagePaidThisMonth: Number(paid.find((x) => x.property_id === r.id)?.s ?? 0),
@@ -959,17 +992,173 @@ router.patch(
   }),
 );
 
-/** Borra la propiedad. Su dividendo y su arriendo quedan como cuentas e ingresos sueltos, con su historial. */
+/** Borra la propiedad y sus documentos adjuntos. Su dividendo y su arriendo quedan como cuentas e ingresos sueltos, con su historial. */
 router.delete(
   '/properties/:id',
   h(async (req, res) => {
     const p = await propertyOf(req);
     await transaction(async (tx) => {
+      await query('DELETE FROM dbo.attachments WHERE property_id = @p', { p: p.id }, tx);
       await query('UPDATE dbo.obligations SET property_id = NULL WHERE property_id = @p', { p: p.id }, tx);
       await query('UPDATE dbo.income_sources SET property_id = NULL WHERE property_id = @p', { p: p.id }, tx);
       await query('DELETE FROM dbo.properties WHERE id = @p', { p: p.id }, tx);
     });
     res.status(204).end();
+  }),
+);
+
+// ---------- Documentos adjuntos (foto o PDF de vehículos y propiedades) ----------
+// Los archivos viven en Azure SQL (dbo.attachment_files) para no pagar Blob Storage: ver docs/adr/0004.
+
+const ATTACHMENT_KINDS = ['circulation_permit', 'technical_review', 'soap', 'insurance', 'registration', 'license', 'deed', 'lease', 'property_tax', 'other'];
+export const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
+/** Tope por hogar: unos cientos de documentos comprimidos, lejos de los 32 GB gratis de la base. */
+export const MAX_HOUSEHOLD_ATTACHMENT_BYTES = 200 * 1024 * 1024;
+
+const ATTACHMENT_TYPES = {
+  'application/pdf': (b) => b.subarray(0, 5).toString('latin1') === '%PDF-',
+  'image/jpeg': (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  'image/png': (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  'image/webp': (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP',
+};
+
+function attachmentView(r) {
+  const expiresOn = fromSql(r.expires_on);
+  const daysLeft = expiresOn ? daysUntil(expiresOn) : undefined;
+  return {
+    id: r.id,
+    householdId: r.household_id,
+    vehicleId: r.vehicle_id ?? undefined,
+    propertyId: r.property_id ?? undefined,
+    obligationId: r.obligation_id ?? undefined,
+    kind: r.kind,
+    title: r.title,
+    expiresOn,
+    daysLeft,
+    status: daysLeft == null ? 'none' : daysLeft < 0 ? 'expired' : daysLeft <= 30 ? 'expires_soon' : 'ok',
+    fileName: r.file_name,
+    contentType: r.content_type,
+    sizeBytes: r.size_bytes,
+    uploadedBy: r.uploaded_by,
+    createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at,
+  };
+}
+
+async function attachmentViews(hid) {
+  const rows = await query('SELECT * FROM dbo.attachments WHERE household_id = @h ORDER BY COALESCE(expires_on, \'9999-12-31\'), id', { h: hid });
+  return rows.map(attachmentView);
+}
+
+function attachmentMeta(b) {
+  if (!ATTACHMENT_KINDS.includes(b.kind)) throw badRequest('El tipo de documento no es válido.');
+  return {
+    k: b.kind,
+    t: str(b.title, 'el nombre del documento', { max: 100 }),
+    e: b.expiresOn == null || b.expiresOn === '' ? date(null) : date(isoDate(b.expiresOn, 'El vencimiento')),
+  };
+}
+
+/** Lee el archivo en base64 (con o sin prefijo data:) y revisa que sea de verdad un PDF o una imagen. */
+function attachmentFile(b) {
+  const contentType = String(b.contentType ?? '').toLowerCase();
+  const check = ATTACHMENT_TYPES[contentType];
+  if (!check) throw badRequest('Solo se aceptan PDF o fotos (JPG, PNG o WebP).');
+  const raw = String(b.data ?? '').replace(/^data:[^,]*;base64,/, '').replace(/\s/g, '');
+  if (!raw || !/^[A-Za-z0-9+/]+={0,2}$/.test(raw)) throw badRequest('Falta el archivo.');
+  const content = Buffer.from(raw, 'base64');
+  if (content.length > MAX_ATTACHMENT_BYTES) throw badRequest('El archivo es muy grande (máximo 4 MB).');
+  if (!check(content)) throw badRequest('El archivo no parece un PDF o una foto válida.');
+  const fileName = (typeof b.fileName === 'string' ? b.fileName.trim().replace(/[\\/\r\n]/g, '_') : '').slice(-200) || 'documento';
+  return { content, contentType, fileName };
+}
+
+/** Dueño del documento: un vehículo o una propiedad del hogar; si viene un papel, sale de él. */
+async function attachmentOwner(b, hid) {
+  if (b.obligationId != null && b.obligationId !== '') {
+    const oid = num(b.obligationId, 'El papel', { min: 1, int: true });
+    const [o] = await query('SELECT vehicle_id, property_id FROM dbo.obligations WHERE id = @o AND household_id = @h', { o: oid, h: hid });
+    if (!o) throw badRequest('El papel no es válido.');
+    if (o.vehicle_id == null && o.property_id == null) throw badRequest('Ese papel no está ligado a un vehículo ni a una propiedad.');
+    return { vid: o.vehicle_id, pid: o.vehicle_id == null ? o.property_id : null, oid };
+  }
+  const vid = await linkedId('vehicles', b.vehicleId, hid, 'El vehículo');
+  const pid = vid == null ? await linkedId('properties', b.propertyId, hid, 'La propiedad') : null;
+  if (vid == null && pid == null) throw badRequest('Elige el vehículo o la propiedad del documento.');
+  return { vid, pid, oid: null };
+}
+
+async function attachmentOf(req) {
+  const aid = idParam(req);
+  const [a] = await query('SELECT * FROM dbo.attachments WHERE id = @a', { a: aid });
+  if (!a) throw notFound('No encontramos ese documento.');
+  await requireMember(a.household_id, req.userId);
+  return a;
+}
+
+router.get(
+  '/households/:id/attachments',
+  h(async (req, res) => {
+    const hid = idParam(req);
+    await requireMember(hid, req.userId);
+    res.json(await attachmentViews(hid));
+  }),
+);
+
+router.post(
+  '/households/:id/attachments',
+  h(async (req, res) => {
+    const hid = idParam(req);
+    await requireMember(hid, req.userId);
+    const meta = attachmentMeta(req.body);
+    const owner = await attachmentOwner(req.body, hid);
+    const file = attachmentFile(req.body);
+    const [used] = await query('SELECT COALESCE(SUM(CAST(size_bytes AS BIGINT)), 0) AS s FROM dbo.attachments WHERE household_id = @h', { h: hid });
+    if (Number(used.s) + file.content.length > MAX_HOUSEHOLD_ATTACHMENT_BYTES) {
+      throw badRequest('El hogar llegó al máximo de 200 MB en documentos. Borra alguno antiguo para subir otro.');
+    }
+    const row = await transaction(async (tx) => {
+      const [a] = await query(
+        `INSERT INTO dbo.attachments (household_id, vehicle_id, property_id, obligation_id, kind, title, expires_on, file_name, content_type, size_bytes, uploaded_by)
+         OUTPUT INSERTED.*
+         VALUES (@h, @vid, @pid, @oid, @k, @t, @e, @fn, @ct, @sz, @u)`,
+        { h: hid, ...owner, ...meta, fn: file.fileName, ct: file.contentType, sz: file.content.length, u: req.userId },
+        tx,
+      );
+      await query('INSERT INTO dbo.attachment_files (attachment_id, content) VALUES (@a, @c)', { a: a.id, c: { type: sql.VarBinary(sql.MAX), value: file.content } }, tx);
+      return a;
+    });
+    res.status(201).json(attachmentView(row));
+  }),
+);
+
+/** Cambia el tipo, el nombre o el vencimiento. El archivo no se reemplaza: se sube uno nuevo y se borra el viejo. */
+router.patch(
+  '/attachments/:id',
+  h(async (req, res) => {
+    const a = await attachmentOf(req);
+    const [row] = await query('UPDATE dbo.attachments SET kind = @k, title = @t, expires_on = @e OUTPUT INSERTED.* WHERE id = @a', {
+      a: a.id,
+      ...attachmentMeta(req.body),
+    });
+    res.json(attachmentView(row));
+  }),
+);
+
+router.delete(
+  '/attachments/:id',
+  h(async (req, res) => {
+    const a = await attachmentOf(req);
+    await query('DELETE FROM dbo.attachments WHERE id = @a', { a: a.id });
+    res.status(204).end();
+  }),
+);
+
+/** Enlace de 10 minutos para abrir el archivo fuera de la app (visor de PDF o navegador). */
+router.post(
+  '/attachments/:id/link',
+  h(async (req, res) => {
+    const a = await attachmentOf(req);
+    res.json({ path: `/attachments/${a.id}/file?t=${encodeURIComponent(signFileToken(a.id))}`, expiresInSeconds: 600 });
   }),
 );
 

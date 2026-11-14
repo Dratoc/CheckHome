@@ -180,8 +180,8 @@ export type Vehicle = {
   year?: number;
 };
 
-/** Vehículo con sus papeles (permiso, revisión técnica, SOAP, seguro). */
-export type VehicleView = Vehicle & { documents: ObligationView[] };
+/** Vehículo con sus papeles (permiso, revisión técnica, SOAP, seguro) y sus documentos digitales. */
+export type VehicleView = Vehicle & { documents: ObligationView[]; attachments: Attachment[] };
 
 export type Property = {
   id: number;
@@ -193,7 +193,43 @@ export type Property = {
 /** Propiedad con su dividendo, su arriendo y lo pagado y recibido este mes. */
 export type PropertyView = Property & {
   mortgages: ObligationView[];
+  attachments: Attachment[];
   rentSources: IncomeSource[];
   rentThisMonth: number;
   mortgagePaidThisMonth: number;
+};
+
+export type AttachmentKind =
+  | 'circulation_permit'
+  | 'technical_review'
+  | 'soap'
+  | 'insurance'
+  | 'registration'
+  | 'license'
+  | 'deed'
+  | 'lease'
+  | 'property_tax'
+  | 'other';
+
+export type AttachmentContentType = 'application/pdf' | 'image/jpeg' | 'image/png' | 'image/webp';
+
+/** Documento digital (foto o PDF) de un vehículo o propiedad; si es la copia de un papel, obligationId lo liga. */
+export type Attachment = {
+  id: number;
+  householdId: number;
+  vehicleId?: number;
+  propertyId?: number;
+  obligationId?: number;
+  kind: AttachmentKind;
+  title: string;
+  /** YYYY-MM-DD */
+  expiresOn?: string;
+  daysLeft?: number;
+  /** none: sin vencimiento; expires_soon: 30 días o menos */
+  status: 'none' | 'ok' | 'expires_soon' | 'expired';
+  fileName: string;
+  contentType: AttachmentContentType;
+  sizeBytes: number;
+  uploadedBy: number;
+  createdAt: string;
 };
