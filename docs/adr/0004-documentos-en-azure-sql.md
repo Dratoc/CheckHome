@@ -20,7 +20,7 @@ Para un hogar de dos personas son unos 20 a 30 documentos al año. Con fotos com
 
 ## Decisión
 
-- Los datos del documento van en `dbo.attachments` y los bytes en `dbo.attachment_files` (migración `0004`), para
+- Los datos del documento van en `dbo.attachments` y los bytes en `dbo.attachment_files` (migración `0005`), para
   que listar no lea los archivos.
 - Cada documento es de un vehículo o de una propiedad y, si es la copia de un papel con vencimiento, también de
   esa cuenta (`obligation_id`). Tiene vencimiento opcional.

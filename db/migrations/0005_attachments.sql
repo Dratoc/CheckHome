@@ -1,4 +1,4 @@
--- 0004_attachments.sql
+-- 0005_attachments.sql
 -- Documentos digitales (foto o PDF) de vehículos y propiedades: permiso de circulación, revisión técnica, SOAP,
 -- escritura, contrato de arriendo, etc. Ver docs/adr/0004-documentos-en-azure-sql.md.
 -- Los archivos van en la misma base gratis (no en Blob Storage) para no crear recursos que cobren.
