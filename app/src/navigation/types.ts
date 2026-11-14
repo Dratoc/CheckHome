@@ -1,7 +1,7 @@
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { CompositeScreenProps, NavigatorScreenParams } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import type { Attachment, AttachmentKind, IncomeSource, ObligationKind, Property, Routine, Vehicle } from '../services/types';
+import type { Attachment, AttachmentKind, IncomeSource, ObligationKind, PaymentMethod, Property, Routine, Vehicle } from '../services/types';
 
 export type TabParamList = {
   Home: undefined;
@@ -52,6 +52,17 @@ export type RootStackParamList = {
     title?: string;
     expiresOn?: string;
   };
+  // Medios de pago y cierre del mes
+  PaymentMethods: undefined;
+  /** Con method, lo edita */
+  AddPaymentMethod: { method?: PaymentMethod } | undefined;
+  /** Sin end, el último estado que ya cortó */
+  CardStatement: { methodId: number; name: string; end?: string };
+  PayCard: { methodId: number; name: string; statementEnd: string; label: string; suggested: number };
+  /** Sin end, el mes del hogar de hoy */
+  Closing: { end?: string } | undefined;
+  FinanceSettings: undefined;
+  AddSavings: undefined;
   DesignPreview: undefined;
 };
 
