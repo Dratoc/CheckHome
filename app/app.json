@@ -31,7 +31,15 @@
     },
     "plugins": [
       "expo-font",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "CheckHome usa tus fotos para adjuntar documentos de tus vehículos y casas.",
+          "cameraPermission": "CheckHome usa la cámara para fotografiar documentos de tus vehículos y casas.",
+          "microphonePermission": false
+        }
+      ]
     ]
   }
 }

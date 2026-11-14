@@ -1,7 +1,7 @@
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { CompositeScreenProps, NavigatorScreenParams } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import type { IncomeSource, ObligationKind, Property, Routine, Vehicle } from '../services/types';
+import type { Attachment, AttachmentKind, IncomeSource, ObligationKind, Property, Routine, Vehicle } from '../services/types';
 
 export type TabParamList = {
   Home: undefined;
@@ -41,6 +41,17 @@ export type RootStackParamList = {
   /** Con property, la edita */
   AddProperty: { property?: Property } | undefined;
   Loans: undefined;
+  /** Con attachment, lo edita; si no, sube uno nuevo al vehículo, propiedad o papel indicado */
+  AddAttachment: {
+    attachment?: Attachment;
+    owner?: 'vehicle' | 'property';
+    vehicleId?: number;
+    propertyId?: number;
+    obligationId?: number;
+    kind?: AttachmentKind;
+    title?: string;
+    expiresOn?: string;
+  };
   DesignPreview: undefined;
 };
 

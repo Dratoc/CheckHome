@@ -1,4 +1,8 @@
+import { Linking, Platform } from 'react-native';
 import type {
+  Attachment,
+  AttachmentContentType,
+  AttachmentKind,
   BacklogTaskView,
   Category,
   Expense,
@@ -296,6 +300,55 @@ export function updateProperty(propertyId: number, input: PropertyInput): Promis
 /** Borra la propiedad; su dividendo y arriendo quedan como cuentas e ingresos sueltos. */
 export function deleteProperty(propertyId: number) {
   return del(`/properties/${propertyId}`);
+}
+
+// ---------- Documentos adjuntos ----------
+
+export function listAttachments(householdId: number): Promise<Attachment[]> {
+  return get(`/households/${householdId}/attachments`);
+}
+
+export type AttachmentMeta = { kind: AttachmentKind; title: string; expiresOn?: string };
+
+/** El archivo ya comprimido, en base64. Dueño: vehicleId, propertyId u obligationId (el papel). */
+export type AttachmentUpload = AttachmentMeta & {
+  vehicleId?: number;
+  propertyId?: number;
+  obligationId?: number;
+  fileName: string;
+  contentType: AttachmentContentType;
+  data: string;
+};
+
+export function uploadAttachment(householdId: number, input: AttachmentUpload): Promise<Attachment> {
+  return post(`/households/${householdId}/attachments`, input);
+}
+
+export function updateAttachment(attachmentId: number, input: AttachmentMeta): Promise<Attachment> {
+  return patch(`/attachments/${attachmentId}`, input);
+}
+
+export function deleteAttachment(attachmentId: number) {
+  return del(`/attachments/${attachmentId}`);
+}
+
+/**
+ * Abre el documento en el visor del teléfono (PDF) o en el navegador, con un enlace que vale 10 minutos.
+ * En la web se abre la pestaña antes de esperar a la API, porque Safari bloquea ventanas abiertas después.
+ */
+export async function openAttachment(attachmentId: number): Promise<true> {
+  const tab = Platform.OS === 'web' && typeof window !== 'undefined' ? window.open('', '_blank') : null;
+  try {
+    const { path } = await post<{ path: string }>(`/attachments/${attachmentId}/link`);
+    const url = Platform.OS === 'web' ? new URL(API_URL + path, window.location.href).href : API_URL + path;
+    if (Platform.OS !== 'web') await Linking.openURL(url);
+    else if (tab) tab.location.href = url;
+    else window.location.href = url;
+    return true;
+  } catch (e) {
+    tab?.close();
+    throw e;
+  }
 }
 
 // ---------- Tareas ----------

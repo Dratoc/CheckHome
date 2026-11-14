@@ -29,3 +29,22 @@ export function requireAuth(req, _res, next) {
     next(new ApiError(401, 'Tu sesión venció. Vuelve a iniciar sesión.'));
   }
 }
+
+/**
+ * Enlace corto para abrir un documento en el navegador o el visor del teléfono, que no pueden mandar el encabezado
+ * de sesión. Vale 10 minutos y solo para ese documento (como un SAS de Azure, pero firmado por la API).
+ */
+const FILE_AUDIENCE = 'attachment-file';
+
+export function signFileToken(attachmentId) {
+  return jwt.sign({}, secret(), { subject: String(attachmentId), audience: FILE_AUDIENCE, expiresIn: '10m' });
+}
+
+export function verifyFileToken(token, attachmentId) {
+  try {
+    const payload = jwt.verify(String(token ?? ''), secret(), { audience: FILE_AUDIENCE });
+    return payload.sub === String(attachmentId);
+  } catch {
+    return false;
+  }
+}
