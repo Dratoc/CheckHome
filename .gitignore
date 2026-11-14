@@ -5,3 +5,4 @@ node_modules/
 *.apk
 .claude/settings.local.json
 .swa-api/
+.swa-web/

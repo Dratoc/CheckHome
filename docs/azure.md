@@ -64,6 +64,13 @@ TAGS="proyecto=app-hogar entorno=dev"
 - Firewall: solo `azure-services`. Presupuesto `presupuesto-checkhome` USD 1.
 - Probado: `/health` 200, `/uf` 200 (mindicador), registro 201, `/households` 200 con `X-CheckHome-Token`.
 
+## Versión web para iPhone (PWA)
+
+La misma Static Web App sirve la versión web de la app en la raíz (`https://<host>/`) y la API en `/api`.
+`deploy-swa.sh` exporta `app/` con `npx expo export --platform web` (con `EXPO_PUBLIC_API_URL=/api`) y la sube
+junto con la API. No crea recursos nuevos ni cambia el plan: sigue en Free. En el iPhone: abrir la URL en Safari →
+Compartir → "Agregar a pantalla de inicio". La sesión se guarda en el almacenamiento del navegador.
+
 ## Antes del 13 dic 2026
 
 La prueba vence y la suscripción se deshabilita. Lo gratis sigue gratis solo si la suscripción pasa a pago por

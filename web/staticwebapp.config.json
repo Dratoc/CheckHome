@@ -1,5 +1,17 @@
 {
   "platform": {
     "apiRuntime": "node:20"
-  }
+  },
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/api/*", "/_expo/*", "/assets/*", "/*.{png,ico,json,webmanifest,js,css}"]
+  },
+  "mimeTypes": {
+    ".webmanifest": "application/manifest+json"
+  },
+  "routes": [
+    { "route": "/_expo/*", "headers": { "cache-control": "public, max-age=31536000, immutable" } },
+    { "route": "/index.html", "headers": { "cache-control": "no-cache" } },
+    { "route": "/", "headers": { "cache-control": "no-cache" } }
+  ]
 }
