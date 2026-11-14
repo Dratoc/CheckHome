@@ -1166,34 +1166,112 @@ router.post(
 
 const periodStart = (frequency) => (frequency === 'daily' ? today() : weekStart(today()));
 
+/** Vista de una rutina: mientras está en votación no tiene puntos y muestra cuántos faltan por votar. */
+function routineView(r, votes, members, userId) {
+  const rv = votes.filter((v) => v.routine_id === r.id);
+  const estimating = r.status === 'estimating';
+  return {
+    id: r.id,
+    householdId: r.household_id,
+    name: r.name,
+    frequency: r.frequency,
+    status: r.status,
+    points: estimating ? undefined : r.points,
+    doneBy: r.done_by ?? undefined,
+    votes: rv.length,
+    myVote: rv.find((v) => v.user_id === userId)?.points,
+    pendingVoters: estimating ? Math.max(0, members - rv.length) : 0,
+  };
+}
+
+async function routineViews(hid, userId, where = '', params = {}) {
+  const p = { h: hid, d: date(today()), w: date(weekStart(today())), ...params };
+  const rows = await query(
+    `SELECT r.id, r.household_id, r.name, r.frequency, r.points, r.status, c.user_id AS done_by
+       FROM dbo.routines r
+       LEFT JOIN dbo.routine_checks c ON c.routine_id = r.id AND c.period_start = IIF(r.frequency = 'daily', @d, @w)
+      WHERE r.household_id = @h ${where} ORDER BY r.frequency, r.id`,
+    p,
+  );
+  const votes = await query(
+    `SELECT v.routine_id, v.user_id, v.points FROM dbo.routine_votes v JOIN dbo.routines r ON r.id = v.routine_id
+      WHERE r.household_id = @h AND r.status = 'estimating'`,
+    { h: hid },
+  );
+  const [{ n: members }] = await query('SELECT COUNT(*) AS n FROM dbo.household_members WHERE household_id = @h', { h: hid });
+  return rows.map((r) => routineView(r, votes, members, userId));
+}
+
 router.get(
   '/households/:id/routines',
   h(async (req, res) => {
     const hid = idParam(req);
     await requireMember(hid, req.userId);
-    const p = { h: hid, d: date(today()), w: date(weekStart(today())) };
-    const rows = await query(
-      `SELECT r.id, r.household_id, r.name, r.frequency, r.points, c.user_id AS done_by
-         FROM dbo.routines r
-         LEFT JOIN dbo.routine_checks c ON c.routine_id = r.id AND c.period_start = IIF(r.frequency = 'daily', @d, @w)
-        WHERE r.household_id = @h ORDER BY r.frequency, r.id`,
-      p,
-    );
-    res.json(rows.map((r) => ({ id: r.id, householdId: r.household_id, name: r.name, frequency: r.frequency, points: r.points, doneBy: r.done_by ?? undefined })));
+    res.json(await routineViews(hid, req.userId));
   }),
 );
 
+const votePoints = (value) => {
+  const points = Number(value);
+  if (!FIBONACCI.includes(points)) throw badRequest('El voto debe ser 1, 2, 3, 5, 8 o 13.');
+  return points;
+};
+
+/**
+ * Guarda el voto y, si ya votaron todos los miembros, habilita la rutina con el voto más alto. Si después entra
+ * alguien nuevo al hogar, las rutinas que siguen en votación también esperan su voto; las activas no cambian.
+ */
+async function voteRoutine(routineId, householdId, userId, points, tx) {
+  const p = { r: routineId, u: userId, p: points, h: householdId };
+  await query(
+    `MERGE dbo.routine_votes WITH (HOLDLOCK) AS v USING (SELECT @r AS routine_id, @u AS user_id) s
+        ON v.routine_id = s.routine_id AND v.user_id = s.user_id
+      WHEN MATCHED THEN UPDATE SET points = @p, voted_at = SYSUTCDATETIME()
+      WHEN NOT MATCHED THEN INSERT (routine_id, user_id, points) VALUES (@r, @u, @p);`,
+    p,
+    tx,
+  );
+  await query(
+    `UPDATE dbo.routines SET status = 'active', points = (SELECT MAX(points) FROM dbo.routine_votes WHERE routine_id = @r)
+      WHERE id = @r AND status = 'estimating'
+        AND (SELECT COUNT(*) FROM dbo.routine_votes WHERE routine_id = @r) >= (SELECT COUNT(*) FROM dbo.household_members WHERE household_id = @h)`,
+    p,
+    tx,
+  );
+}
+
+/** Nueva rutina: nace en votación y los puntos que eligió quien la crea cuentan como su voto. */
 router.post(
   '/households/:id/routines',
   h(async (req, res) => {
     const hid = idParam(req);
     await requireMember(hid, req.userId);
     const frequency = req.body.frequency === 'weekly' ? 'weekly' : 'daily';
-    const [row] = await query(
-      'INSERT INTO dbo.routines (household_id, name, frequency, points) OUTPUT INSERTED.* VALUES (@h, @n, @f, @p)',
-      { h: hid, n: str(req.body.name, 'el nombre', { max: 100 }), f: frequency, p: num(req.body.points ?? 1, 'Los puntos', { min: 1, max: 13, int: true }) },
-    );
-    res.status(201).json({ id: row.id, householdId: hid, name: row.name, frequency: row.frequency, points: row.points });
+    const name = str(req.body.name, 'el nombre', { max: 100 });
+    const points = votePoints(req.body.points ?? 1);
+    const id = await transaction(async (tx) => {
+      const [row] = await query(
+        "INSERT INTO dbo.routines (household_id, name, frequency, points, status) OUTPUT INSERTED.id VALUES (@h, @n, @f, @p, 'estimating')",
+        { h: hid, n: name, f: frequency, p: points },
+        tx,
+      );
+      await voteRoutine(row.id, hid, req.userId, points, tx);
+      return row.id;
+    });
+    const [view] = await routineViews(hid, req.userId, 'AND r.id = @r', { r: id });
+    res.status(201).json(view);
+  }),
+);
+
+/** Voto de un miembro mientras la rutina está en votación (puede cambiarlo hasta que voten todos). */
+router.post(
+  '/routines/:id/vote',
+  h(async (req, res) => {
+    const r = await routineOf(req);
+    if (r.status !== 'estimating') throw conflict('Esta rutina ya no está en votación.');
+    const points = votePoints(req.body.points);
+    await transaction((tx) => voteRoutine(r.id, r.household_id, req.userId, points, tx));
+    res.status(204).end();
   }),
 );
 
@@ -1201,9 +1279,10 @@ router.post(
   '/routines/:id/toggle',
   h(async (req, res) => {
     const rid = idParam(req);
-    const [r] = await query('SELECT household_id, frequency FROM dbo.routines WHERE id = @r', { r: rid });
+    const [r] = await query('SELECT household_id, frequency, status FROM dbo.routines WHERE id = @r', { r: rid });
     if (!r) throw notFound('No encontramos esa rutina.');
     await requireMember(r.household_id, req.userId);
+    if (r.status === 'estimating') throw conflict('Esta rutina todavía no la valoran todos.');
     const p = { r: rid, d: date(periodStart(r.frequency)), u: req.userId };
     const deleted = await query('DELETE FROM dbo.routine_checks OUTPUT DELETED.routine_id WHERE routine_id = @r AND period_start = @d', p);
     if (!deleted.length) {
@@ -1225,18 +1304,19 @@ async function routineOf(req) {
   return r;
 }
 
+/** Cambia el nombre o la frecuencia. Los puntos no se editan: salen de la votación de todos. */
 router.patch(
   '/routines/:id',
   h(async (req, res) => {
     const r = await routineOf(req);
     const frequency = req.body.frequency === 'weekly' ? 'weekly' : 'daily';
-    const [row] = await query('UPDATE dbo.routines SET name = @n, frequency = @f, points = @p OUTPUT INSERTED.* WHERE id = @r', {
+    await query('UPDATE dbo.routines SET name = @n, frequency = @f WHERE id = @r', {
       r: r.id,
       n: str(req.body.name, 'el nombre', { max: 100 }),
       f: frequency,
-      p: num(req.body.points ?? 1, 'Los puntos', { min: 1, max: 13, int: true }),
     });
-    res.json({ id: row.id, householdId: row.household_id, name: row.name, frequency: row.frequency, points: row.points });
+    const [view] = await routineViews(r.household_id, req.userId, 'AND r.id = @r', { r: r.id });
+    res.json(view);
   }),
 );
 
@@ -1247,6 +1327,7 @@ router.delete(
     const r = await routineOf(req);
     await transaction(async (tx) => {
       await query('DELETE FROM dbo.routine_checks WHERE routine_id = @r', { r: r.id }, tx);
+      await query('DELETE FROM dbo.routine_votes WHERE routine_id = @r', { r: r.id }, tx);
       await query('DELETE FROM dbo.routines WHERE id = @r', { r: r.id }, tx);
     });
     res.status(204).end();

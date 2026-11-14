@@ -359,14 +359,21 @@ export function listRoutines(householdId: number): Promise<RoutineWithCheck[]> {
   return get(`/households/${householdId}/routines`);
 }
 
-export type RoutineInput = { name: string; frequency: Frequency; points: number };
+export type RoutineInput = { name: string; frequency: Frequency };
 
-export function createRoutine(householdId: number, input: RoutineInput): Promise<Routine> {
+/** Nace en votación; los puntos que elige quien la crea son su voto. */
+export function createRoutine(householdId: number, input: RoutineInput & { points: number }): Promise<Routine> {
   return post(`/households/${householdId}/routines`, input);
 }
 
+/** Cambia nombre y frecuencia. Los puntos salen de la votación. */
 export function updateRoutine(routineId: number, input: RoutineInput): Promise<Routine> {
   return patch(`/routines/${routineId}`, input);
+}
+
+/** Cada miembro valora la rutina; cuando votaron todos, se habilita con el voto más alto. */
+export function voteRoutine(routineId: number, points: number): Promise<void> {
+  return post(`/routines/${routineId}/vote`, { points });
 }
 
 export function deleteRoutine(routineId: number) {

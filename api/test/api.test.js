@@ -108,6 +108,16 @@ test('flujo completo de dos personas en un hogar', { skip: !cs && 'sin TEST_SQL_
 
   const r = await call('POST', `/households/${hid}/routines`, { name: 'Loza', frequency: 'daily', points: 2 }, ta);
   assert.equal(r.status, 201);
+  assert.equal(r.body.status, 'estimating', 'toda rutina nace en votación');
+  assert.equal(r.body.myVote, 2, 'los puntos de quien la crea cuentan como su voto');
+  assert.equal(r.body.pendingVoters, 1);
+  assert.equal(r.body.points, undefined);
+  assert.equal((await call('POST', `/routines/${r.body.id}/toggle`, {}, tb)).status, 409, 'no se marca hasta que voten todos');
+  assert.equal((await call('POST', `/routines/${r.body.id}/vote`, { points: 4 }, tb)).status, 400);
+  assert.equal((await call('POST', `/routines/${r.body.id}/vote`, { points: 2 }, tb)).status, 204);
+  const [active] = (await call('GET', `/households/${hid}/routines`, null, ta)).body;
+  assert.deepEqual([active.status, active.points], ['active', 2]);
+  assert.equal((await call('POST', `/routines/${r.body.id}/vote`, { points: 5 }, ta)).status, 409, 'ya no está en votación');
   assert.equal((await call('POST', `/routines/${r.body.id}/toggle`, {}, tb)).status, 204);
   assert.equal((await call('GET', `/households/${hid}/routines`, null, ta)).body[0].doneBy, b.body.user.id);
 
@@ -196,9 +206,15 @@ test('editar, borrar e historial de pagos', { skip: !cs && 'sin TEST_SQL_CONNECT
 
   // Rutinas y backlog.
   const r = (await call('POST', `/households/${hid}/routines`, { name: 'Loza', frequency: 'daily', points: 2 }, ta)).body;
+  await call('POST', `/routines/${r.id}/vote`, { points: 5 }, tb);
+  await call('POST', `/routines/${r.id}/vote`, { points: 3 }, ta);
   await call('POST', `/routines/${r.id}/toggle`, {}, tb);
-  const rEdit = await call('PATCH', `/routines/${r.id}`, { name: 'Lavar loza', frequency: 'weekly', points: 3 }, tb);
-  assert.deepEqual([rEdit.body.name, rEdit.body.frequency, rEdit.body.points], ['Lavar loza', 'weekly', 3]);
+  const rEdit = await call('PATCH', `/routines/${r.id}`, { name: 'Lavar loza', frequency: 'weekly', points: 13 }, tb);
+  assert.deepEqual([rEdit.body.name, rEdit.body.frequency, rEdit.body.points], ['Lavar loza', 'weekly', 5], 'vale el voto más alto y no se edita a mano');
+  // Hogar de una persona: su voto basta. Quien entra después vota las rutinas que siguen pendientes.
+  const solo = (await call('POST', '/households', { name: 'Depto' }, c.token)).body;
+  const own = (await call('POST', `/households/${solo.id}/routines`, { name: 'Basura', frequency: 'weekly', points: 3 }, c.token)).body;
+  assert.deepEqual([own.status, own.points], ['active', 3]);
   assert.equal((await call('DELETE', `/routines/${r.id}`, null, ta)).status, 204);
   assert.equal((await call('GET', `/households/${hid}/routines`, null, ta)).body.length, 0);
 

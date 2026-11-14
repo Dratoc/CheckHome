@@ -105,12 +105,22 @@ export type ObligationPayment = {
 
 export type Frequency = 'daily' | 'weekly';
 
+/** estimating: los miembros la están valorando; active: ya se puede marcar. */
+export type RoutineStatus = 'estimating' | 'active';
+
 export type Routine = {
   id: number;
   householdId: number;
   name: string;
   frequency: Frequency;
-  points: number;
+  status: RoutineStatus;
+  /** Puntos acordados (el voto más alto); no hay mientras está en votación */
+  points?: number;
+  /** Cuántos votaron */
+  votes: number;
+  myVote?: number;
+  /** Cuántos miembros faltan por votar */
+  pendingVoters: number;
 };
 
 export type RoutineCheck = {

@@ -34,7 +34,7 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
   const toggle = useRoutineToggle(user.id, routines.reload);
 
   const upcoming = (obligations.data ?? []).filter((o) => o.status !== 'ok').slice(0, 3);
-  const daily = (routines.data ?? []).filter((r) => r.frequency === 'daily');
+  const daily = (routines.data ?? []).filter((r) => r.frequency === 'daily' && r.status === 'active');
   const done = daily.filter(toggle.isChecked).length;
 
   return (
@@ -128,7 +128,7 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
                 <Checkbox
                   key={r.id}
                   label={r.name}
-                  hint={`+${r.points} ${r.points === 1 ? 'pto' : 'pts'}`}
+                  hint={`+${r.points ?? 0} ${r.points === 1 ? 'pto' : 'pts'}`}
                   checked={toggle.isChecked(r)}
                   onChange={() => toggle.toggle(r)}
                 />

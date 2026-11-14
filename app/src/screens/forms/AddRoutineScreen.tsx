@@ -7,12 +7,15 @@ import type { Frequency } from '../../services/types';
 import { useHousehold } from '../../state/SessionProvider';
 import { confirmDanger } from '../../utils/confirm';
 
-const POINTS = [1, 2, 3, 5, 8].map((n) => ({ value: n, label: String(n) }));
+const POINTS = api.FIBONACCI.map((n) => ({ value: n, label: String(n) }));
 
-const saveRoutine = (householdId: number, routineId: number | undefined, input: api.RoutineInput) =>
-  routineId ? api.updateRoutine(routineId, input) : api.createRoutine(householdId, input);
+const saveRoutine = (householdId: number, routineId: number | undefined, input: api.RoutineInput & { points: number }) =>
+  routineId ? api.updateRoutine(routineId, { name: input.name, frequency: input.frequency }) : api.createRoutine(householdId, input);
 
-/** Nueva rutina: se define una vez y se repite cada día o cada semana. Con routine, la edita. */
+/**
+ * Nueva rutina: se define una vez y se repite cada día o cada semana. Nace en votación: los puntos que elige quien la
+ * crea son su voto, y se habilita cuando votaron todos, con el voto más alto. Con routine, edita nombre y frecuencia.
+ */
 export function AddRoutineScreen({ navigation, route }: RootScreenProps<'AddRoutine'>) {
   const { household } = useHousehold();
   const routine = route.params?.routine;
@@ -20,7 +23,7 @@ export function AddRoutineScreen({ navigation, route }: RootScreenProps<'AddRout
   const remove = useMutation(api.deleteRoutine);
   const [name, setName] = useState(routine?.name ?? '');
   const [frequency, setFrequency] = useState<Frequency>(routine?.frequency ?? 'daily');
-  const [points, setPoints] = useState(routine?.points ?? 1);
+  const [points, setPoints] = useState<number>(1);
   const [submitted, setSubmitted] = useState(false);
 
   const submit = async () => {
@@ -47,9 +50,13 @@ export function AddRoutineScreen({ navigation, route }: RootScreenProps<'AddRout
           { value: 'weekly', label: 'Una vez por semana' },
         ]}
       />
-      <ChoiceChips label="Puntos" options={POINTS} value={points} onChange={setPoints} />
+      {!routine && <ChoiceChips label="Tu valoración (puntos)" options={POINTS} value={points} onChange={setPoints} />}
       <Text variant="caption" color="textMuted">
-        Quien la marca suma estos puntos en el ranking de la semana.
+        {!routine
+          ? 'Todos los de la casa la valoran antes de habilitarla y queda con el voto más alto. Quien la marca suma esos puntos en el ranking.'
+          : routine.status === 'estimating'
+            ? 'Está en votación: los puntos se valoran en la pestaña Rutinas y queda con el voto más alto.'
+            : `Vale ${routine.points} ${routine.points === 1 ? 'punto' : 'puntos'}: el voto más alto de la casa.`}
       </Text>
       {(save.error || remove.error) && (
         <Text color="danger" accessibilityRole="alert">

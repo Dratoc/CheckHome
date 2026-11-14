@@ -30,7 +30,7 @@ con su historial de **pagos**. Así los vencimientos y las métricas salen de un
   loan, vehicle_doc, other; currency CLP o UF), `obligation_payments` (pesos pagados y valor UF del día),
   `vehicles`, `properties`, `attachments` y `attachment_files` (documentos en foto o PDF, ver
   [ADR 0004](adr/0004-documentos-en-azure-sql.md)).
-- **Tareas:** `routines` (con puntos), `routine_checks`, `backlog_tasks`, `task_votes`.
+- **Tareas:** `routines` (con puntos), `routine_votes`, `routine_checks`, `backlog_tasks`, `task_votes`. Toda tarea (rutina o del backlog) nace en votación: cada miembro la valora y, cuando votaron todos, se habilita con el voto más alto.
 - **Apoyo:** `uf_values`, valor diario de la UF cacheado (ver ADR 0002).
 
 Se calcula y no se guarda: estado al día de cada obligación, cargos fijos del mes, gasto fuera de lo
