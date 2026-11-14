@@ -63,6 +63,7 @@ Después del MVP: métricas y gráficos, notificaciones de vencimiento, fotos de
 | 6 | Puntos | Planning poker; queda el valor más alto |
 | 7 | Privacidad | Ingresos pueden ser privados; gastos siempre compartidos |
 | 8 | Fin de la prueba Azure (~13 dic 2026) | Se decide al terminar el período |
+| 9 | Medios de pago y cierre del mes | El mes del hogar sigue el corte de la tarjeta (del 20 al 19). Cada gasto guarda con qué se pagó y si es del hogar o personal. Pagar la tarjeta es pago de deuda, no gasto, y cuenta como aporte de quien paga; débito y efectivo son aporte de su dueño. El hogar y la meta de ahorro se reparten por el % de sueldo; lo personal, cada uno. El cierre dice quién transfiere a quién |
 
 Postergado: la validación del correo queda para después del MVP; mientras tanto, el acceso a cada hogar se controla con su código de invitación.
 Token de sesión: JWT firmado por la API, clave en la configuración de App Service, 30 días.

@@ -6,6 +6,8 @@ import { date, query, transaction } from './db.js';
 import { addMonths, daysUntil, formatShortDate, fromSql, isIsoDate, monthStart, nextMonthStart, today, weekStart } from './dates.js';
 import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { getUf } from './uf.js';
+import { cardStatementIn, cycleLabel, cycleOf, dueDateOf, nextCycle, previousCycle, statementPaidOn } from './cycle.js';
+import { computeClosing, computeShares } from './closing.js';
 
 export const router = Router();
 
@@ -270,6 +272,7 @@ function obligationView(r, ufValue) {
     lastPaidOn: fromSql(r.last_paid_on),
     installmentsTotal: r.installments_total ?? undefined,
     installmentsPaid: r.installments_paid ?? undefined,
+    paymentMethodId: r.payment_method_id ?? undefined,
     vehicleId: r.vehicle_id ?? undefined,
     vehicleName: r.vehicle_name ?? undefined,
     propertyId: r.property_id ?? undefined,
@@ -308,7 +311,7 @@ async function linkedId(table, v, hid, label) {
   return id;
 }
 
-async function obligationInput(b, hid) {
+async function obligationInput(b, hid, keepMethod) {
   if (!OBLIGATION_KINDS.includes(b.kind)) throw badRequest('El tipo de cuenta no es válido.');
   const currency = b.currency === 'UF' ? 'UF' : 'CLP';
   const total = b.installmentsTotal == null || b.installmentsTotal === '' ? null : num(b.installmentsTotal, 'El total de cuotas', { min: 1, max: 1000, int: true });
@@ -325,6 +328,7 @@ async function obligationInput(b, hid) {
     ip: paid,
     vid: b.kind === 'vehicle_doc' ? await linkedId('vehicles', b.vehicleId, hid, 'El vehículo') : null,
     pid: b.kind === 'mortgage' ? await linkedId('properties', b.propertyId, hid, 'La propiedad') : null,
+    pm: await paymentMethodId(b.paymentMethodId, hid, keepMethod),
   };
 }
 
@@ -352,9 +356,9 @@ router.post(
     const hid = idParam(req);
     await requireMember(hid, req.userId);
     const [row] = await query(
-      `INSERT INTO dbo.obligations (household_id, kind, name, currency, amount, next_due_on, every_months, account_number, installments_total, installments_paid, vehicle_id, property_id)
+      `INSERT INTO dbo.obligations (household_id, kind, name, currency, amount, next_due_on, every_months, account_number, installments_total, installments_paid, vehicle_id, property_id, payment_method_id)
        OUTPUT INSERTED.id
-       VALUES (@h, @k, @n, @c, @a, @d, @e, @acc, @it, @ip, @vid, @pid)`,
+       VALUES (@h, @k, @n, @c, @a, @d, @e, @acc, @it, @ip, @vid, @pid, @pm)`,
       { h: hid, ...(await obligationInput(req.body, hid)) },
     );
     res.status(201).json(await obligationById(row.id));
@@ -375,10 +379,10 @@ router.patch(
     const [row] = await query(
       `UPDATE dbo.obligations
           SET kind = @k, name = @n, currency = @c, amount = @a, next_due_on = @d, every_months = @e, account_number = @acc,
-              installments_total = @it, installments_paid = @ip, vehicle_id = @vid, property_id = @pid, updated_at = SYSUTCDATETIME()
+              installments_total = @it, installments_paid = @ip, vehicle_id = @vid, property_id = @pid, payment_method_id = @pm, updated_at = SYSUTCDATETIME()
        OUTPUT INSERTED.id
         WHERE id = @o`,
-      { o: o.id, ...(await obligationInput(req.body, o.household_id)) },
+      { o: o.id, ...(await obligationInput({ paymentMethodId: o.payment_method_id, ...req.body }, o.household_id, o.payment_method_id)) },
     );
     res.json(await obligationById(row.id));
   }),
@@ -403,8 +407,8 @@ router.get(
   h(async (req, res) => {
     const o = await obligationOf(req);
     const rows = await query(
-      `SELECT p.id, p.obligation_id, p.user_id, p.amount_clp, p.uf_value, p.paid_on, u.display_name
-         FROM dbo.obligation_payments p JOIN dbo.users u ON u.id = p.user_id
+      `SELECT p.id, p.obligation_id, p.user_id, p.amount_clp, p.uf_value, p.paid_on, u.display_name, pm.name AS method_name
+         FROM dbo.obligation_payments p JOIN dbo.users u ON u.id = p.user_id LEFT JOIN dbo.payment_methods pm ON pm.id = p.payment_method_id
         WHERE p.obligation_id = @o ORDER BY p.paid_on DESC, p.id DESC`,
       { o: o.id },
     );
@@ -417,6 +421,7 @@ router.get(
         amountClp: Number(r.amount_clp),
         ufValue: r.uf_value == null ? undefined : Number(r.uf_value),
         paidOn: fromSql(r.paid_on),
+        paymentMethodName: r.method_name ?? undefined,
         canUndo: i === 0,
       })),
     );
@@ -435,10 +440,12 @@ router.post(
     if (isUf && !uf) throw badRequest('No tenemos el valor de la UF de hoy. Intenta más tarde.');
     const amountClp = req.body?.amountClp != null ? num(req.body.amountClp, 'El monto', { min: 1 }) : isUf ? Math.round(Number(o.amount) * uf) : Number(o.amount);
     const paidOn = today();
+    // Con qué se pagó: lo que diga la app o, si no, el medio habitual de la cuenta.
+    const pm = req.body && 'paymentMethodId' in req.body ? await paymentMethodId(req.body.paymentMethodId, o.household_id) : o.payment_method_id;
     await transaction(async (tx) => {
       await query(
-        'INSERT INTO dbo.obligation_payments (obligation_id, user_id, amount_clp, uf_value, paid_on) VALUES (@o, @u, @a, @uf, @d)',
-        { o: oid, u: req.userId, a: amountClp, uf, d: date(paidOn) },
+        'INSERT INTO dbo.obligation_payments (obligation_id, user_id, amount_clp, uf_value, paid_on, payment_method_id) VALUES (@o, @u, @a, @uf, @d, @pm)',
+        { o: oid, u: req.userId, a: amountClp, uf, d: date(paidOn), pm },
         tx,
       );
       await query(
@@ -529,14 +536,16 @@ router.get(
       p,
     );
     const expenses = await query(
-      `SELECT e.id, e.amount, e.spent_on, e.description, c.name AS category, u.display_name
+      `SELECT e.id, e.amount, e.spent_on, e.description, c.name AS category, u.display_name, pm.name AS method_name, pu.display_name AS personal_name
          FROM dbo.expenses e JOIN dbo.categories c ON c.id = e.category_id JOIN dbo.users u ON u.id = e.user_id
+         LEFT JOIN dbo.payment_methods pm ON pm.id = e.payment_method_id LEFT JOIN dbo.users pu ON pu.id = e.personal_user_id
         WHERE e.household_id = @h AND e.spent_on >= @from`,
       p,
     );
     const payments = await query(
-      `SELECT p.id, p.obligation_id, p.amount_clp, p.paid_on, o.name, u.display_name
+      `SELECT p.id, p.obligation_id, p.amount_clp, p.paid_on, o.name, u.display_name, pm.name AS method_name
          FROM dbo.obligation_payments p JOIN dbo.obligations o ON o.id = p.obligation_id JOIN dbo.users u ON u.id = p.user_id
+         LEFT JOIN dbo.payment_methods pm ON pm.id = p.payment_method_id
         WHERE o.household_id = @h AND p.paid_on >= @from`,
       p,
     );
@@ -547,11 +556,12 @@ router.get(
       }),
       ...expenses.map((r) => {
         const d = fromSql(r.spent_on);
-        return { key: `e${r.id}`, id: r.id, kind: 'expense', title: r.description || r.category, subtitle: `${formatShortDate(d)} · ${r.category} · ${firstName(r.display_name)}`, amount: Number(r.amount), date: d };
+        const parts = [formatShortDate(d), r.category, r.method_name ?? firstName(r.display_name), r.personal_name ? `Personal de ${firstName(r.personal_name)}` : null];
+        return { key: `e${r.id}`, id: r.id, kind: 'expense', title: r.description || r.category, subtitle: parts.filter(Boolean).join(' · '), amount: Number(r.amount), date: d };
       }),
       ...payments.map((r) => {
         const d = fromSql(r.paid_on);
-        return { key: `p${r.id}`, id: r.id, obligationId: r.obligation_id, kind: 'payment', title: r.name, subtitle: `${formatShortDate(d)} · Pago de cuenta · ${firstName(r.display_name)}`, amount: Number(r.amount_clp), date: d };
+        return { key: `p${r.id}`, id: r.id, obligationId: r.obligation_id, kind: 'payment', title: r.name, subtitle: `${formatShortDate(d)} · Pago de cuenta · ${r.method_name ?? firstName(r.display_name)}`, amount: Number(r.amount_clp), date: d };
       }),
     ];
     rows.sort((a, b) => b.date.localeCompare(a.date) || b.key.localeCompare(a.key));
@@ -729,6 +739,24 @@ router.get(
   }),
 );
 
+/** Medio de pago del mismo hogar (o null). Uno archivado solo se acepta si el gasto ya lo tenía. */
+async function paymentMethodId(v, hid, keep) {
+  if (v == null || v === '' || v === 0) return null;
+  const id = num(v, 'El medio de pago', { min: 1, int: true });
+  const [r] = await query('SELECT is_archived FROM dbo.payment_methods WHERE id = @i AND household_id = @h', { i: id, h: hid });
+  if (!r || (r.is_archived && id !== keep)) throw badRequest('El medio de pago no es válido.');
+  return id;
+}
+
+/** Persona dueña de un gasto personal (o null si es del hogar). Debe ser miembro. */
+async function personalUserId(v, hid) {
+  if (v == null || v === '' || v === 0) return null;
+  const id = num(v, 'La persona', { min: 1, int: true });
+  const [r] = await query('SELECT 1 AS x FROM dbo.household_members WHERE household_id = @h AND user_id = @u', { h: hid, u: id });
+  if (!r) throw badRequest('Esa persona no es parte del hogar.');
+  return id;
+}
+
 router.post(
   '/households/:id/expenses',
   h(async (req, res) => {
@@ -741,12 +769,14 @@ router.post(
     if (!cat) throw badRequest('La categoría no es válida.');
     const description = typeof req.body.description === 'string' ? req.body.description.trim().slice(0, 200) : '';
     const spentOn = req.body.spentOn ? isoDate(req.body.spentOn, 'La fecha') : today();
+    const pm = await paymentMethodId(req.body.paymentMethodId, hid);
+    const pu = await personalUserId(req.body.personalUserId, hid);
     const [row] = await query(
-      `INSERT INTO dbo.expenses (household_id, user_id, category_id, amount, description, spent_on)
-       OUTPUT INSERTED.id VALUES (@h, @u, @c, @a, @d, @s)`,
-      { h: hid, u: req.userId, c: categoryId, a: amount, d: description, s: date(spentOn) },
+      `INSERT INTO dbo.expenses (household_id, user_id, category_id, amount, description, spent_on, payment_method_id, personal_user_id)
+       OUTPUT INSERTED.* VALUES (@h, @u, @c, @a, @d, @s, @pm, @pu)`,
+      { h: hid, u: req.userId, c: categoryId, a: amount, d: description, s: date(spentOn), pm, pu },
     );
-    res.status(201).json({ id: row.id, householdId: hid, userId: req.userId, categoryId, amount, description, spentOn });
+    res.status(201).json(expenseRow(row, true));
   }),
 );
 
@@ -767,6 +797,8 @@ const expenseRow = (r, canEdit) => ({
   amount: Number(r.amount),
   description: r.description ?? '',
   spentOn: fromSql(r.spent_on),
+  paymentMethodId: r.payment_method_id ?? undefined,
+  personalUserId: r.personal_user_id ?? undefined,
   canEdit,
 });
 
@@ -790,9 +822,12 @@ router.patch(
     if (!cat) throw badRequest('La categoría no es válida.');
     const description = typeof req.body.description === 'string' ? req.body.description.trim().slice(0, 200) : '';
     const spentOn = req.body.spentOn ? isoDate(req.body.spentOn, 'La fecha') : fromSql(e.spent_on);
+    // Si la app no manda medio de pago ni persona (versión anterior), se mantienen los que tenía.
+    const pm = 'paymentMethodId' in req.body ? await paymentMethodId(req.body.paymentMethodId, e.household_id, e.payment_method_id) : e.payment_method_id;
+    const pu = 'personalUserId' in req.body ? await personalUserId(req.body.personalUserId, e.household_id) : e.personal_user_id;
     const [row] = await query(
-      'UPDATE dbo.expenses SET amount = @a, category_id = @c, description = @d, spent_on = @s OUTPUT INSERTED.* WHERE id = @e',
-      { e: e.id, a: amount, c: categoryId, d: description, s: date(spentOn) },
+      'UPDATE dbo.expenses SET amount = @a, category_id = @c, description = @d, spent_on = @s, payment_method_id = @pm, personal_user_id = @pu OUTPUT INSERTED.* WHERE id = @e',
+      { e: e.id, a: amount, c: categoryId, d: description, s: date(spentOn), pm, pu },
     );
     res.json(expenseRow(row, true));
   }),
@@ -1208,5 +1243,491 @@ router.get(
       { h: hid, w: date(weekStart(today())) },
     );
     res.json(rows.map((r) => ({ user: { ...publicUser(r), role: r.role }, points: r.points })));
+  }),
+);
+
+// ---------- Medios de pago, ahorro y cierre del mes (migración 0004) ----------
+
+const METHOD_KINDS = ['credit', 'debit', 'cash'];
+
+const methodRow = (r) => ({
+  id: r.id,
+  householdId: r.household_id,
+  ownerUserId: r.owner_user_id,
+  ownerName: r.owner_name ?? undefined,
+  kind: r.kind,
+  name: r.name,
+  cutDay: r.cut_day ?? undefined,
+  dueDay: r.due_day ?? undefined,
+  isArchived: Boolean(r.is_archived),
+});
+
+const METHOD_SELECT = `SELECT pm.*, u.display_name AS owner_name FROM dbo.payment_methods pm JOIN dbo.users u ON u.id = pm.owner_user_id`;
+
+async function methodOf(req) {
+  const id = idParam(req);
+  const [m] = await query(`${METHOD_SELECT} WHERE pm.id = @i`, { i: id });
+  if (!m) throw notFound('No encontramos ese medio de pago.');
+  await requireMember(m.household_id, req.userId);
+  return m;
+}
+
+async function methodInput(b, hid, kind) {
+  const owner = b.ownerUserId == null || b.ownerUserId === '' ? null : await personalUserId(b.ownerUserId, hid);
+  const credit = kind === 'credit';
+  return {
+    n: str(b.name, 'el nombre', { max: 100 }),
+    o: owner,
+    cd: credit ? num(b.cutDay, 'El día de corte', { min: 1, max: 31, int: true }) : null,
+    dd: credit ? num(b.dueDay, 'El día de vencimiento', { min: 1, max: 31, int: true }) : null,
+  };
+}
+
+router.get(
+  '/households/:id/payment-methods',
+  h(async (req, res) => {
+    const hid = idParam(req);
+    await requireMember(hid, req.userId);
+    const all = req.query.all === '1';
+    const rows = await query(
+      `${METHOD_SELECT} WHERE pm.household_id = @h ${all ? '' : 'AND pm.is_archived = 0'}
+        ORDER BY CASE pm.kind WHEN 'credit' THEN 0 WHEN 'debit' THEN 1 ELSE 2 END, pm.id`,
+      { h: hid },
+    );
+    res.json(rows.map(methodRow));
+  }),
+);
+
+router.post(
+  '/households/:id/payment-methods',
+  h(async (req, res) => {
+    const hid = idParam(req);
+    await requireMember(hid, req.userId);
+    const kind = req.body.kind;
+    if (!METHOD_KINDS.includes(kind)) throw badRequest('El tipo de medio de pago no es válido.');
+    const input = await methodInput(req.body, hid, kind);
+    const row = await transaction(async (tx) => {
+      const [r] = await query(
+        'INSERT INTO dbo.payment_methods (household_id, owner_user_id, kind, name, cut_day, due_day) OUTPUT INSERTED.id VALUES (@h, @o, @k, @n, @cd, @dd)',
+        { h: hid, k: kind, ...input, o: input.o ?? req.userId },
+        tx,
+      );
+      // La primera tarjeta de crédito fija el ciclo del hogar (del día siguiente al corte hasta el corte).
+      if (kind === 'credit') {
+        await query('UPDATE dbo.households SET cycle_cut_day = @cd WHERE id = @h AND cycle_cut_day IS NULL', { h: hid, cd: input.cd }, tx);
+      }
+      const [full] = await query(`${METHOD_SELECT} WHERE pm.id = @i`, { i: r.id }, tx);
+      return full;
+    });
+    res.status(201).json(methodRow(row));
+  }),
+);
+
+router.patch(
+  '/payment-methods/:id',
+  h(async (req, res) => {
+    const m = await methodOf(req);
+    const input = await methodInput(req.body, m.household_id, m.kind);
+    await query('UPDATE dbo.payment_methods SET name = @n, owner_user_id = @o, cut_day = @cd, due_day = @dd WHERE id = @i', {
+      i: m.id,
+      ...input,
+      o: input.o ?? m.owner_user_id,
+    });
+    const [row] = await query(`${METHOD_SELECT} WHERE pm.id = @i`, { i: m.id });
+    res.json(methodRow(row));
+  }),
+);
+
+/** Si ya se usó, se archiva (los gastos guardan de dónde salió la plata); si no, se borra. */
+router.delete(
+  '/payment-methods/:id',
+  h(async (req, res) => {
+    const m = await methodOf(req);
+    const [used] = await query(
+      `SELECT CASE WHEN EXISTS (SELECT 1 FROM dbo.expenses WHERE payment_method_id = @i)
+                     OR EXISTS (SELECT 1 FROM dbo.obligation_payments WHERE payment_method_id = @i)
+                     OR EXISTS (SELECT 1 FROM dbo.card_payments WHERE payment_method_id = @i) THEN 1 ELSE 0 END AS used`,
+      { i: m.id },
+    );
+    await transaction(async (tx) => {
+      await query('UPDATE dbo.obligations SET payment_method_id = NULL WHERE payment_method_id = @i', { i: m.id }, tx);
+      if (used.used) await query('UPDATE dbo.payment_methods SET is_archived = 1 WHERE id = @i', { i: m.id }, tx);
+      else await query('DELETE FROM dbo.payment_methods WHERE id = @i', { i: m.id }, tx);
+    });
+    res.status(204).end();
+  }),
+);
+
+/** Cargos de una tarjeta en un estado de cuenta: gastos y cuentas pagadas con ella entre el inicio y el corte. */
+async function cardCharges(methodId, st) {
+  const p = { m: methodId, from: date(st.start), to: date(st.end) };
+  const expenses = await query(
+    `SELECT e.id, e.amount, e.spent_on, e.description, c.name AS category, pu.display_name AS personal_name
+       FROM dbo.expenses e JOIN dbo.categories c ON c.id = e.category_id LEFT JOIN dbo.users pu ON pu.id = e.personal_user_id
+      WHERE e.payment_method_id = @m AND e.spent_on BETWEEN @from AND @to`,
+    p,
+  );
+  const bills = await query(
+    `SELECT p.id, p.obligation_id, p.amount_clp, p.paid_on, o.name
+       FROM dbo.obligation_payments p JOIN dbo.obligations o ON o.id = p.obligation_id
+      WHERE p.payment_method_id = @m AND p.paid_on BETWEEN @from AND @to`,
+    p,
+  );
+  const rows = [
+    ...expenses.map((r) => ({
+      key: `e${r.id}`,
+      id: r.id,
+      kind: 'expense',
+      title: r.description || r.category,
+      subtitle: r.personal_name ? `${r.category} · Personal de ${String(r.personal_name).split(' ')[0]}` : r.category,
+      amount: Number(r.amount),
+      date: fromSql(r.spent_on),
+    })),
+    ...bills.map((r) => ({ key: `p${r.id}`, id: r.id, obligationId: r.obligation_id, kind: 'payment', title: r.name, subtitle: 'Pago de cuenta', amount: Number(r.amount_clp), date: fromSql(r.paid_on) })),
+  ];
+  rows.sort((a, b) => b.date.localeCompare(a.date) || b.key.localeCompare(a.key));
+  return rows;
+}
+
+async function cardPaymentsFor(methodId, statementEnd) {
+  return query(
+    `SELECT cp.id, cp.amount, cp.paid_on, cp.user_id, u.display_name FROM dbo.card_payments cp JOIN dbo.users u ON u.id = cp.user_id
+      WHERE cp.payment_method_id = @m AND cp.statement_end = @s ORDER BY cp.paid_on, cp.id`,
+    { m: methodId, s: date(statementEnd) },
+  );
+}
+
+function statementView(m, st, charges, payments) {
+  const charged = charges.reduce((s, c) => s + c.amount, 0);
+  const paid = payments.reduce((s, p) => s + Number(p.amount), 0);
+  return {
+    methodId: m.id,
+    name: m.name,
+    ownerUserId: m.owner_user_id,
+    ownerName: m.owner_name,
+    start: st.start,
+    end: st.end,
+    label: cycleLabel(st),
+    dueOn: dueDateOf(st.end, m.due_day),
+    isClosed: st.end < today(),
+    charged,
+    paid,
+    pending: Math.max(0, charged - paid),
+  };
+}
+
+/**
+ * Estado de cuenta de una tarjeta según la app ("facturado según la app"), para compararlo con el del banco.
+ * ?end=YYYY-MM-DD elige el corte; por defecto, el último corte que ya pasó.
+ */
+router.get(
+  '/payment-methods/:id/statement',
+  h(async (req, res) => {
+    const m = await methodOf(req);
+    if (m.kind !== 'credit') throw badRequest('Solo las tarjetas de crédito tienen estado de cuenta.');
+    const st = req.query.end ? cycleOf(isoDate(req.query.end, 'El corte'), m.cut_day) : statementPaidOn(today(), m.cut_day);
+    const charges = await cardCharges(m.id, st);
+    const payments = await cardPaymentsFor(m.id, st.end);
+    res.json({
+      ...statementView(m, st, charges, payments),
+      prevEnd: previousCycle(st, m.cut_day).end,
+      nextEnd: nextCycle(st, m.cut_day).end,
+      charges,
+      payments: payments.map((p) => ({ id: p.id, amount: Number(p.amount), paidOn: fromSql(p.paid_on), userId: p.user_id, paidBy: p.display_name })),
+    });
+  }),
+);
+
+/** Pagar la tarjeta: pago de deuda, no gasto. Cuenta como aporte de quien paga. */
+router.post(
+  '/payment-methods/:id/payments',
+  h(async (req, res) => {
+    const m = await methodOf(req);
+    if (m.kind !== 'credit') throw badRequest('Solo se pagan las tarjetas de crédito.');
+    const paidOn = req.body.paidOn ? isoDate(req.body.paidOn, 'La fecha') : today();
+    const statementEnd = req.body.statementEnd ? cycleOf(isoDate(req.body.statementEnd, 'El corte'), m.cut_day).end : statementPaidOn(paidOn, m.cut_day).end;
+    const payer = req.body.userId ? await personalUserId(req.body.userId, m.household_id) : req.userId;
+    const [row] = await query(
+      'INSERT INTO dbo.card_payments (payment_method_id, user_id, amount, paid_on, statement_end) OUTPUT INSERTED.id VALUES (@m, @u, @a, @d, @s)',
+      { m: m.id, u: payer, a: num(req.body.amount, 'El monto', { min: 1 }), d: date(paidOn), s: date(statementEnd) },
+    );
+    res.status(201).json({ id: row.id, statementEnd });
+  }),
+);
+
+router.delete(
+  '/card-payments/:id',
+  h(async (req, res) => {
+    const id = idParam(req);
+    const [p] = await query('SELECT cp.id, cp.user_id, pm.household_id FROM dbo.card_payments cp JOIN dbo.payment_methods pm ON pm.id = cp.payment_method_id WHERE cp.id = @i', { i: id });
+    if (!p) throw notFound('No encontramos ese pago.');
+    const m = await requireMember(p.household_id, req.userId);
+    if (p.user_id !== req.userId && m.role !== 'admin') throw forbidden('Solo quien pagó o un administrador puede borrar este pago.');
+    await query('DELETE FROM dbo.card_payments WHERE id = @i', { i: id });
+    res.status(204).end();
+  }),
+);
+
+// Ajustes del mes: corte del ciclo, meta de ahorro y % de cada uno.
+
+async function householdFinance(hid) {
+  const [hh] = await query('SELECT cycle_cut_day, savings_goal FROM dbo.households WHERE id = @h', { h: hid });
+  const members = await query(
+    `SELECT u.id, u.display_name, m.share_pct FROM dbo.household_members m JOIN dbo.users u ON u.id = m.user_id
+      WHERE m.household_id = @h ORDER BY m.joined_at`,
+    { h: hid },
+  );
+  // El sueldo de cada uno: monto habitual de sus fuentes, sin arriendos. Las privadas cuentan, pero solo se muestra el %.
+  const incomes = await query(
+    'SELECT user_id, SUM(expected_amount) AS s FROM dbo.income_sources WHERE household_id = @h AND property_id IS NULL GROUP BY user_id',
+    { h: hid },
+  );
+  const ms = members.map((r) => ({ userId: r.id, name: r.display_name, sharePct: r.share_pct == null ? null : Number(r.share_pct) }));
+  const { source, shares } = computeShares(ms, Object.fromEntries(incomes.map((r) => [r.user_id, Number(r.s)])));
+  return {
+    cycleCutDay: hh.cycle_cut_day ?? undefined,
+    savingsGoal: Number(hh.savings_goal ?? 0),
+    shareSource: source,
+    members: ms.map((m) => ({ ...m, sharePct: m.sharePct ?? undefined, share: Math.round((shares[m.userId] ?? 0) * 1000) / 10 })),
+    shares,
+  };
+}
+
+const financeView = ({ shares: _s, ...rest }) => rest;
+
+router.get(
+  '/households/:id/finance-settings',
+  h(async (req, res) => {
+    const hid = idParam(req);
+    await requireMember(hid, req.userId);
+    res.json(financeView(await householdFinance(hid)));
+  }),
+);
+
+/** { cycleCutDay (null = mes calendario), savingsGoal, shares: [{ userId, pct }] o null para calcular por sueldos }. */
+router.patch(
+  '/households/:id/finance-settings',
+  h(async (req, res) => {
+    const hid = idParam(req);
+    await requireMember(hid, req.userId);
+    const b = req.body;
+    const cut = b.cycleCutDay == null || b.cycleCutDay === '' ? null : num(b.cycleCutDay, 'El día de corte', { min: 1, max: 31, int: true });
+    const goal = num(b.savingsGoal ?? 0, 'La meta de ahorro', { max: 1e10 });
+    let shares = null;
+    if (Array.isArray(b.shares)) {
+      shares = b.shares.map((s) => ({ u: num(s.userId, 'La persona', { min: 1, int: true }), p: num(s.pct, 'El porcentaje', { max: 100 }) }));
+      const total = shares.reduce((s, x) => s + x.p, 0);
+      if (Math.abs(total - 100) > 0.5) throw badRequest('Los porcentajes deben sumar 100.');
+    }
+    await transaction(async (tx) => {
+      await query('UPDATE dbo.households SET cycle_cut_day = @c, savings_goal = @g, updated_at = SYSUTCDATETIME() WHERE id = @h', { h: hid, c: cut, g: goal }, tx);
+      if ('shares' in b) {
+        await query('UPDATE dbo.household_members SET share_pct = NULL WHERE household_id = @h', { h: hid }, tx);
+        for (const s of shares ?? []) {
+          await query('UPDATE dbo.household_members SET share_pct = @p WHERE household_id = @h AND user_id = @u', { h: hid, u: s.u, p: s.p }, tx);
+        }
+      }
+    });
+    res.json(financeView(await householdFinance(hid)));
+  }),
+);
+
+// Ahorro en común.
+
+router.get(
+  '/households/:id/savings',
+  h(async (req, res) => {
+    const hid = idParam(req);
+    await requireMember(hid, req.userId);
+    const [hh] = await query('SELECT savings_goal FROM dbo.households WHERE id = @h', { h: hid });
+    const [total] = await query('SELECT ISNULL(SUM(amount), 0) AS s FROM dbo.savings_deposits WHERE household_id = @h', { h: hid });
+    const rows = await query(
+      `SELECT TOP 30 d.id, d.user_id, d.amount, d.deposited_on, d.note, u.display_name
+         FROM dbo.savings_deposits d JOIN dbo.users u ON u.id = d.user_id
+        WHERE d.household_id = @h ORDER BY d.deposited_on DESC, d.id DESC`,
+      { h: hid },
+    );
+    res.json({
+      goal: Number(hh.savings_goal ?? 0),
+      total: Number(total.s),
+      deposits: rows.map((r) => ({ id: r.id, userId: r.user_id, depositedBy: r.display_name, amount: Number(r.amount), depositedOn: fromSql(r.deposited_on), note: r.note })),
+    });
+  }),
+);
+
+router.post(
+  '/households/:id/savings',
+  h(async (req, res) => {
+    const hid = idParam(req);
+    await requireMember(hid, req.userId);
+    const depositedOn = req.body.depositedOn ? isoDate(req.body.depositedOn, 'La fecha') : today();
+    const note = typeof req.body.note === 'string' ? req.body.note.trim().slice(0, 200) : '';
+    const [row] = await query(
+      'INSERT INTO dbo.savings_deposits (household_id, user_id, amount, deposited_on, note) OUTPUT INSERTED.id VALUES (@h, @u, @a, @d, @n)',
+      { h: hid, u: req.userId, a: num(req.body.amount, 'El monto', { min: 1 }), d: date(depositedOn), n: note },
+    );
+    res.status(201).json({ id: row.id });
+  }),
+);
+
+router.delete(
+  '/savings-deposits/:id',
+  h(async (req, res) => {
+    const id = idParam(req);
+    const [d] = await query('SELECT id, user_id, household_id FROM dbo.savings_deposits WHERE id = @i', { i: id });
+    if (!d) throw notFound('No encontramos ese depósito.');
+    const m = await requireMember(d.household_id, req.userId);
+    if (d.user_id !== req.userId && m.role !== 'admin') throw forbidden('Solo quien depositó o un administrador puede borrarlo.');
+    await query('DELETE FROM dbo.savings_deposits WHERE id = @i', { i: id });
+    res.status(204).end();
+  }),
+);
+
+// Cierre del mes.
+
+/** Quién puso la plata de un gasto o pago: con crédito nadie todavía; con débito o efectivo, su dueño; sin medio, quien lo anotó. */
+const payerOf = (r) => (r.method_kind === 'credit' ? null : r.method_kind ? r.owner_user_id : r.user_id);
+
+async function closingFor(hid, cycleEnd) {
+  const fin = await householdFinance(hid);
+  const cycle = cycleOf(cycleEnd ?? today(), fin.cycleCutDay ?? null);
+  const p = { h: hid, from: date(cycle.start), to: date(cycle.end) };
+
+  const expenses = await query(
+    `SELECT e.amount, e.user_id, e.personal_user_id, pm.kind AS method_kind, pm.owner_user_id
+       FROM dbo.expenses e LEFT JOIN dbo.payment_methods pm ON pm.id = e.payment_method_id
+      WHERE e.household_id = @h AND e.spent_on BETWEEN @from AND @to`,
+    p,
+  );
+  const bills = await query(
+    `SELECT p.amount_clp AS amount, p.user_id, pm.kind AS method_kind, pm.owner_user_id
+       FROM dbo.obligation_payments p JOIN dbo.obligations o ON o.id = p.obligation_id LEFT JOIN dbo.payment_methods pm ON pm.id = p.payment_method_id
+      WHERE o.household_id = @h AND p.paid_on BETWEEN @from AND @to`,
+    p,
+  );
+  const deposits = await query(
+    'SELECT user_id, SUM(amount) AS s FROM dbo.savings_deposits WHERE household_id = @h AND deposited_on BETWEEN @from AND @to GROUP BY user_id',
+    p,
+  );
+  const [savingsAll] = await query('SELECT ISNULL(SUM(amount), 0) AS s FROM dbo.savings_deposits WHERE household_id = @h', { h: hid });
+  const cardsRaw = await query(`${METHOD_SELECT} WHERE pm.household_id = @h AND pm.kind = 'credit'`, { h: hid });
+
+  const paid = {};
+  const add = (uid, field, amount) => {
+    if (uid == null) return;
+    paid[uid] ??= { expenses: 0, cardPayments: 0, savings: 0 };
+    paid[uid][field] += amount;
+  };
+  const personal = {};
+  let household = 0;
+  let byCredit = 0;
+  for (const e of expenses) {
+    const a = Number(e.amount);
+    if (e.personal_user_id) personal[e.personal_user_id] = (personal[e.personal_user_id] ?? 0) + a;
+    else household += a;
+    if (e.method_kind === 'credit') byCredit += a;
+    add(payerOf(e), 'expenses', a);
+  }
+  for (const b of bills) {
+    const a = Number(b.amount);
+    household += a;
+    if (b.method_kind === 'credit') byCredit += a;
+    add(payerOf(b), 'expenses', a);
+  }
+  for (const d of deposits) add(d.user_id, 'savings', Number(d.s));
+
+  // Cada tarjeta: el estado que corta dentro de este ciclo, lo cargado según la app y lo pagado para ese estado.
+  const cards = [];
+  for (const m of cardsRaw) {
+    const st = cardStatementIn(cycle, m.cut_day);
+    const charges = await cardCharges(m.id, st);
+    const payments = await cardPaymentsFor(m.id, st.end);
+    if (m.is_archived && !charges.length && !payments.length) continue;
+    for (const cp of payments) add(cp.user_id, 'cardPayments', Number(cp.amount));
+    cards.push(statementView(m, st, charges, payments));
+  }
+
+  const savingsDeposited = deposits.reduce((s, d) => s + Number(d.s), 0);
+  const result = computeClosing({
+    members: fin.members,
+    shares: fin.shares,
+    household,
+    personal,
+    paid,
+    cards: cards.map((c) => ({ ownerUserId: c.ownerUserId, pending: c.pending })),
+    savingsGoal: fin.savingsGoal,
+    savingsDeposited,
+  });
+  const names = Object.fromEntries(fin.members.map((m) => [m.userId, m.name]));
+  const [closed] = await query(
+    `SELECT c.closed_at, c.snapshot, u.display_name FROM dbo.month_closings c JOIN dbo.users u ON u.id = c.closed_by
+      WHERE c.household_id = @h AND c.cycle_end = @e`,
+    { h: hid, e: date(cycle.end) },
+  );
+  const t = today();
+  return {
+    cycle: { ...cycle, label: cycleLabel(cycle), cutDay: fin.cycleCutDay, hasEnded: cycle.end < t, isCurrent: cycle.start <= t && t <= cycle.end },
+    prevEnd: previousCycle(cycle, fin.cycleCutDay ?? null).end,
+    nextEnd: nextCycle(cycle, fin.cycleCutDay ?? null).end,
+    shareSource: fin.shareSource,
+    totals: {
+      household: Math.round(household),
+      personal: Math.round(Object.values(personal).reduce((s, x) => s + x, 0)),
+      byCredit: Math.round(byCredit),
+      savingsGoal: fin.savingsGoal,
+      savingsDeposited: Math.round(savingsDeposited),
+      savingsTotal: Number(savingsAll.s),
+    },
+    pendingCard: result.pendingCard,
+    savingsShortfall: result.savingsShortfall,
+    isFinal: result.isFinal,
+    members: result.members.map((m) => ({ ...m, name: names[m.userId] })),
+    cards,
+    transfers: result.transfers.map((x) => ({ ...x, fromName: names[x.fromUserId], toName: names[x.toUserId] })),
+    closed: closed
+      ? { closedAt: closed.closed_at.toISOString(), closedBy: closed.display_name, transfers: JSON.parse(closed.snapshot).transfers ?? [] }
+      : undefined,
+  };
+}
+
+/** Cierre del ciclo que contiene ?end=YYYY-MM-DD (por defecto, el ciclo de hoy). */
+router.get(
+  '/households/:id/closing',
+  h(async (req, res) => {
+    const hid = idParam(req);
+    await requireMember(hid, req.userId);
+    res.json(await closingFor(hid, req.query.end ? isoDate(req.query.end, 'La fecha') : undefined));
+  }),
+);
+
+/** Marca las transferencias como hechas y cierra el ciclo, guardando la foto de cómo quedó. */
+router.post(
+  '/households/:id/closings',
+  h(async (req, res) => {
+    const hid = idParam(req);
+    await requireMember(hid, req.userId);
+    const c = await closingFor(hid, isoDate(req.body.cycleEnd, 'El ciclo'));
+    if (!c.cycle.hasEnded) throw badRequest(`El mes del hogar termina el ${formatShortDate(c.cycle.end)}. Ciérralo después de esa fecha.`);
+    if (c.closed) throw conflict('Este mes ya está cerrado.');
+    const snapshot = JSON.stringify({ totals: c.totals, members: c.members, cards: c.cards, transfers: c.transfers, isFinal: c.isFinal });
+    await query('INSERT INTO dbo.month_closings (household_id, cycle_end, closed_by, snapshot) VALUES (@h, @e, @u, @s)', {
+      h: hid,
+      e: date(c.cycle.end),
+      u: req.userId,
+      s: snapshot,
+    });
+    res.status(201).json(await closingFor(hid, c.cycle.end));
+  }),
+);
+
+/** Reabre un mes cerrado por error. */
+router.delete(
+  '/households/:id/closings/:end',
+  h(async (req, res) => {
+    const hid = idParam(req);
+    await requireMember(hid, req.userId);
+    const end = isoDate(req.params.end, 'El ciclo');
+    await query('DELETE FROM dbo.month_closings WHERE household_id = @h AND cycle_end = @e', { h: hid, e: date(end) });
+    res.status(204).end();
   }),
 );

@@ -9,6 +9,7 @@ import { confirmDanger } from '../../utils/confirm';
 import { parseUserDate, toUserDate } from '../../utils/dates';
 import { obligationIcon } from '../tabs/obligationUi';
 import { parseClp, parseDecimal, showClp } from './money';
+import { methodChoices } from '../money/paymentMethodUi';
 
 const KINDS: Choice<ObligationKind>[] = [
   { value: 'utility', label: 'Servicio', icon: obligationIcon.utility },
@@ -38,6 +39,7 @@ export function AddObligationScreen({ navigation, route }: RootScreenProps<'AddO
   const preset = route.params;
   const vehicles = useQuery(() => api.listVehicles(household.id), [household.id]);
   const properties = useQuery(() => api.listProperties(household.id), [household.id]);
+  const methods = useQuery(() => api.listPaymentMethods(household.id), [household.id]);
   const existing = useQuery(() => (obligationId ? api.getObligation(obligationId) : Promise.resolve(undefined)), [obligationId]);
   const save = useMutation(saveObligation);
   const remove = useMutation(api.deleteObligation);
@@ -53,6 +55,8 @@ export function AddObligationScreen({ navigation, route }: RootScreenProps<'AddO
   const [account, setAccount] = useState('');
   const [total, setTotal] = useState('');
   const [paid, setPaid] = useState('');
+  // 0 = sin definir
+  const [methodId, setMethodId] = useState(0);
   const [submitted, setSubmitted] = useState(false);
   const [filled, setFilled] = useState(false);
 
@@ -71,6 +75,7 @@ export function AddObligationScreen({ navigation, route }: RootScreenProps<'AddO
     setPaid(o.installmentsPaid != null ? String(o.installmentsPaid) : '');
     setVehicleId(o.vehicleId ?? 0);
     setPropertyId(o.propertyId ?? 0);
+    setMethodId(o.paymentMethodId ?? 0);
     setFilled(true);
   }, [o, filled]);
 
@@ -109,6 +114,7 @@ export function AddObligationScreen({ navigation, route }: RootScreenProps<'AddO
       installmentsPaid,
       vehicleId: kind === 'vehicle_doc' && vehicleId ? vehicleId : undefined,
       propertyId: kind === 'mortgage' && propertyId ? propertyId : undefined,
+      paymentMethodId: methodId || null,
     });
     if (saved) navigation.goBack();
   };
@@ -175,6 +181,18 @@ export function AddObligationScreen({ navigation, route }: RootScreenProps<'AddO
       )}
       {(kind === 'utility' || kind === 'subscription') && (
         <TextField label="Número de cliente (opcional)" value={account} onChangeText={setAccount} placeholder="Para tenerlo a mano al pagar" maxLength={50} />
+      )}
+      {(methods.data?.length ?? 0) > 0 && (
+        <ChoiceChips<number>
+          label="Se paga con"
+          options={[
+            ...methodChoices(methods.data ?? []),
+            ...(methodId && !methods.data?.some((m) => m.id === methodId) ? [{ value: methodId, label: 'Medio archivado' }] : []),
+            { value: 0, label: 'Sin definir' },
+          ]}
+          value={methodId}
+          onChange={setMethodId}
+        />
       )}
       {(save.error || remove.error) && (
         <Text color="danger" accessibilityRole="alert">

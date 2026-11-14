@@ -57,7 +57,7 @@ export function ObligationDetailScreen({ navigation, route }: RootScreenProps<'O
               <View key={p.id} style={{ gap: t.spacing.xs }}>
                 <ListItem
                   title={formatShortDate(p.paidOn) + ' ' + p.paidOn.slice(0, 4)}
-                  subtitle={`Pagó ${p.paidBy.split(' ')[0]}${p.ufValue ? ` · UF del día $${formatUf(p.ufValue)}` : ''}`}
+                  subtitle={`Pagó ${p.paidBy.split(' ')[0]}${p.paymentMethodName ? ` con ${p.paymentMethodName}` : ''}${p.ufValue ? ` · UF del día $${formatUf(p.ufValue)}` : ''}`}
                   leading={<IconCircle name="receipt-outline" tone="neutral" />}
                   trailing={<Amount value={p.amountClp} />}
                   divider={i < rows.length - 1 && !p.canUndo}

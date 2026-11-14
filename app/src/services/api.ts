@@ -1,5 +1,11 @@
 import type {
   BacklogTaskView,
+  CardStatementDetail,
+  FinanceSettings,
+  MonthClosing,
+  PaymentMethod,
+  PaymentMethodKind,
+  Savings,
   Category,
   Expense,
   ExpenseView,
@@ -164,6 +170,8 @@ export type ObligationInput = {
   installmentsPaid?: number;
   vehicleId?: number;
   propertyId?: number;
+  /** null = sin definir */
+  paymentMethodId?: number | null;
 };
 
 export function createObligation(householdId: number, input: ObligationInput): Promise<ObligationView> {
@@ -192,8 +200,9 @@ export function undoObligationPayment(paymentId: number) {
   return del(`/obligation-payments/${paymentId}`);
 }
 
-export function payObligation(obligationId: number, _userId?: number): Promise<void> {
-  return post(`/obligations/${obligationId}/pay`);
+/** Sin paymentMethodId se usa el medio habitual de la cuenta. */
+export function payObligation(obligationId: number, _userId?: number, paymentMethodId?: number | null): Promise<void> {
+  return post(`/obligations/${obligationId}/pay`, paymentMethodId === undefined ? {} : { paymentMethodId });
 }
 
 export function listMovements(householdId: number, _userId?: number): Promise<Movement[]> {
@@ -240,7 +249,15 @@ export function listExpenseCategories(householdId: number): Promise<Category[]> 
   return get(`/households/${householdId}/categories?kind=expense`);
 }
 
-export type ExpenseInput = { amount: number; categoryId: number; description: string };
+export type ExpenseInput = {
+  amount: number;
+  categoryId: number;
+  description: string;
+  /** null = sin indicar */
+  paymentMethodId: number | null;
+  /** null = del hogar */
+  personalUserId: number | null;
+};
 
 export function addExpense(householdId: number, _userId: number, input: ExpenseInput): Promise<Expense> {
   return post(`/households/${householdId}/expenses`, input);
@@ -256,6 +273,81 @@ export function updateExpense(expenseId: number, input: ExpenseInput & { spentOn
 
 export function deleteExpense(expenseId: number) {
   return del(`/expenses/${expenseId}`);
+}
+
+// ---------- Medios de pago, ahorro y cierre del mes ----------
+
+export function listPaymentMethods(householdId: number): Promise<PaymentMethod[]> {
+  return get(`/households/${householdId}/payment-methods`);
+}
+
+export type PaymentMethodInput = { kind: PaymentMethodKind; name: string; ownerUserId: number; cutDay?: number; dueDay?: number };
+
+export function createPaymentMethod(householdId: number, input: PaymentMethodInput): Promise<PaymentMethod> {
+  return post(`/households/${householdId}/payment-methods`, input);
+}
+
+export function updatePaymentMethod(methodId: number, input: PaymentMethodInput): Promise<PaymentMethod> {
+  return patch(`/payment-methods/${methodId}`, input);
+}
+
+/** Si ya tiene gastos, queda archivado (los gastos guardan de dónde salió la plata). */
+export function deletePaymentMethod(methodId: number) {
+  return del(`/payment-methods/${methodId}`);
+}
+
+/** Sin end, el último estado de cuenta que ya cortó. */
+export function getCardStatement(methodId: number, end?: string): Promise<CardStatementDetail> {
+  return get(`/payment-methods/${methodId}/statement${end ? `?end=${end}` : ''}`);
+}
+
+/** Pagar la tarjeta: es pago de deuda, no gasto. */
+export function payCard(methodId: number, amount: number, statementEnd?: string): Promise<{ id: number; statementEnd: string }> {
+  return post(`/payment-methods/${methodId}/payments`, { amount, statementEnd });
+}
+
+export function deleteCardPayment(paymentId: number) {
+  return del(`/card-payments/${paymentId}`);
+}
+
+export function getFinanceSettings(householdId: number): Promise<FinanceSettings> {
+  return get(`/households/${householdId}/finance-settings`);
+}
+
+export type FinanceSettingsInput = {
+  cycleCutDay: number | null;
+  savingsGoal: number;
+  /** null = calcular con los sueldos */
+  shares: { userId: number; pct: number }[] | null;
+};
+
+export function updateFinanceSettings(householdId: number, input: FinanceSettingsInput): Promise<FinanceSettings> {
+  return patch(`/households/${householdId}/finance-settings`, input);
+}
+
+export function getSavings(householdId: number): Promise<Savings> {
+  return get(`/households/${householdId}/savings`);
+}
+
+export function addSavingsDeposit(householdId: number, amount: number, note?: string): Promise<{ id: number }> {
+  return post(`/households/${householdId}/savings`, { amount, note });
+}
+
+export function deleteSavingsDeposit(depositId: number) {
+  return del(`/savings-deposits/${depositId}`);
+}
+
+/** Sin end, el mes del hogar de hoy. */
+export function getClosing(householdId: number, end?: string): Promise<MonthClosing> {
+  return get(`/households/${householdId}/closing${end ? `?end=${end}` : ''}`);
+}
+
+export function closeMonth(householdId: number, cycleEnd: string): Promise<MonthClosing> {
+  return post(`/households/${householdId}/closings`, { cycleEnd });
+}
+
+export function reopenMonth(householdId: number, cycleEnd: string) {
+  return del(`/households/${householdId}/closings/${cycleEnd}`);
 }
 
 // ---------- Vehículos y propiedades ----------

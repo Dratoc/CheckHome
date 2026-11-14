@@ -265,3 +265,90 @@ test('vehículos con papeles y propiedades con dividendo y arriendo', { skip: !c
   assert.equal((await call('GET', `/obligations/${div.id}`, null, ta)).body.propertyId, undefined);
   assert.equal((await call('GET', `/households/${hid}/properties`, null, ta)).body.length, 0);
 });
+
+test('medios de pago, cuadratura de la tarjeta y cierre del mes', { skip: !cs && 'sin TEST_SQL_CONNECTION_STRING' }, async () => {
+  const sfx = 'f' + Date.now().toString(36);
+  const a = (await call('POST', '/auth/register', { email: `a${sfx}@x.cl`, username: `her${sfx}`, displayName: 'Hernán', password: 'secreta123' })).body;
+  const b = (await call('POST', '/auth/register', { email: `b${sfx}@x.cl`, username: `cami${sfx}`, displayName: 'Cami', password: 'secreta123' })).body;
+  const ta = a.token;
+  const tb = b.token;
+  const hh = (await call('POST', '/households', { name: 'Casa' }, ta)).body;
+  const hid = hh.id;
+  await call('POST', '/households/join', { code: hh.inviteCode }, tb);
+  const cats = (await call('GET', `/households/${hid}/categories`, null, ta)).body;
+
+  // Sueldos 60/40: el reparto sale de ahí.
+  await call('POST', `/households/${hid}/income-sources`, { name: 'Sueldo', payDay: 1, expectedAmount: 1500000, isPrivate: true }, ta);
+  await call('POST', `/households/${hid}/income-sources`, { name: 'Sueldo', payDay: 1, expectedAmount: 1000000, isPrivate: false }, tb);
+
+  const credit = await call('POST', `/households/${hid}/payment-methods`, { kind: 'credit', name: 'Visa Hernán', cutDay: 19, dueDay: 5 }, ta);
+  assert.equal(credit.status, 201, JSON.stringify(credit.body));
+  assert.equal((await call('POST', `/households/${hid}/payment-methods`, { kind: 'credit', name: 'X', cutDay: 40, dueDay: 5 }, ta)).status, 400);
+  const debitB = (await call('POST', `/households/${hid}/payment-methods`, { kind: 'debit', name: 'Débito Cami' }, tb)).body;
+  assert.equal(debitB.ownerUserId, b.user.id);
+
+  let settings = (await call('GET', `/households/${hid}/finance-settings`, null, tb)).body;
+  assert.equal(settings.cycleCutDay, 19, 'la primera tarjeta fija el corte del hogar');
+  assert.equal(settings.shareSource, 'income');
+  assert.deepEqual(settings.members.map((m) => m.share), [60, 40]);
+  settings = (await call('PATCH', `/households/${hid}/finance-settings`, { cycleCutDay: 19, savingsGoal: 300000 }, ta)).body;
+  assert.equal(settings.savingsGoal, 300000);
+
+  // Ciclo del 20 sep al 19 oct.
+  const exp = (body, t) => call('POST', `/households/${hid}/expenses`, { categoryId: cats[0].id, ...body }, t);
+  const e1 = await exp({ amount: 500000, spentOn: '2026-10-01', paymentMethodId: credit.body.id }, ta);
+  assert.equal(e1.status, 201, JSON.stringify(e1.body));
+  assert.equal(e1.body.paymentMethodId, credit.body.id);
+  await exp({ amount: 100000, spentOn: '2026-10-02', paymentMethodId: credit.body.id, personalUserId: b.user.id }, tb);
+  await exp({ amount: 50000, spentOn: '2026-09-25', paymentMethodId: credit.body.id, personalUserId: a.user.id }, ta);
+  await exp({ amount: 50000, spentOn: '2026-10-19', paymentMethodId: debitB.id }, tb);
+  await exp({ amount: 99999, spentOn: '2026-10-20', paymentMethodId: credit.body.id }, ta); // ya es del ciclo siguiente
+
+  // Editar sin mandar medio de pago lo mantiene (versión anterior de la app).
+  const kept = await call('PATCH', `/expenses/${e1.body.id}`, { amount: 500000, categoryId: cats[0].id, spentOn: '2026-10-01' }, ta);
+  assert.equal(kept.body.paymentMethodId, credit.body.id);
+
+  const st = (await call('GET', `/payment-methods/${credit.body.id}/statement?end=2026-10-19`, null, tb)).body;
+  assert.equal(st.start, '2026-09-20');
+  assert.equal(st.dueOn, '2026-11-05');
+  assert.equal(st.charged, 650000, 'facturado según la app');
+  assert.equal(st.charges.length, 3);
+
+  // Provisorio: nadie ha pagado la tarjeta; se supone que la paga su dueño.
+  let c = (await call('GET', `/households/${hid}/closing?end=2026-10-01`, null, tb)).body;
+  assert.equal(c.cycle.start, '2026-09-20');
+  assert.equal(c.cycle.end, '2026-10-19');
+  assert.equal(c.totals.household, 550000);
+  assert.equal(c.totals.personal, 150000);
+  assert.equal(c.pendingCard, 650000);
+  assert.equal(c.isFinal, false);
+
+  // El 5 Hernán paga la tarjeta (cuenta para el corte del 19 oct) y cada uno deposita su parte del ahorro.
+  const pay = await call('POST', `/payment-methods/${credit.body.id}/payments`, { amount: 650000, paidOn: '2026-11-05' }, ta);
+  assert.equal(pay.body.statementEnd, '2026-10-19');
+  await call('POST', `/households/${hid}/savings`, { amount: 200000, depositedOn: '2026-10-10' }, ta);
+  await call('POST', `/households/${hid}/savings`, { amount: 100000, depositedOn: '2026-10-10' }, tb);
+
+  c = (await call('GET', `/households/${hid}/closing?end=2026-10-19`, null, tb)).body;
+  assert.equal(c.isFinal, true, JSON.stringify(c));
+  assert.equal(c.cards[0].pending, 0);
+  assert.deepEqual(
+    c.transfers.map((t) => [t.fromName, t.toName, t.amount]),
+    [['Cami', 'Hernán', 290000]],
+  );
+
+  // Cerrar el mes guarda la foto; no se cierra dos veces ni un ciclo que no ha terminado.
+  const closed = await call('POST', `/households/${hid}/closings`, { cycleEnd: '2026-10-19' }, tb);
+  assert.equal(closed.status, 201, JSON.stringify(closed.body));
+  assert.equal(closed.body.closed.closedBy, 'Cami');
+  assert.equal(closed.body.closed.transfers[0].amount, 290000);
+  assert.equal((await call('POST', `/households/${hid}/closings`, { cycleEnd: '2026-10-19' }, ta)).status, 409);
+  assert.equal((await call('POST', `/households/${hid}/closings`, { cycleEnd: '2099-01-19' }, ta)).status, 400);
+  assert.equal((await call('DELETE', `/households/${hid}/closings/2026-10-19`, null, ta)).status, 204);
+
+  // Un medio de pago usado se archiva en vez de borrarse.
+  assert.equal((await call('DELETE', `/payment-methods/${debitB.id}`, null, ta)).status, 204);
+  const all = (await call('GET', `/households/${hid}/payment-methods?all=1`, null, ta)).body;
+  assert.equal(all.find((m) => m.id === debitB.id).isArchived, true);
+  assert.equal((await call('GET', `/households/${hid}/payment-methods`, null, ta)).body.length, 1);
+});
