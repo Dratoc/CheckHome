@@ -59,11 +59,18 @@ export function AccountsScreen({ navigation }: TabScreenProps<'Accounts'>) {
         <IncomeSources onAdd={() => navigation.navigate('AddIncomeSource')} onReceive={(s) => navigation.navigate('AddIncome', { source: s })} />
       )}
 
+      <SectionHeader title="Mes del hogar" />
+      <Card padding="md">
+        <ListItem title="Cierre del mes" subtitle="Cuánto le toca a cada uno y quién transfiere a quién" leading={<IconCircle name="calculator-outline" tone="primary" />} onPress={() => navigation.navigate('Closing')} divider />
+        <ListItem title="Medios de pago" subtitle="Tarjeta de crédito, débito y efectivo" leading={<IconCircle name="card-outline" tone="primary" />} onPress={() => navigation.navigate('PaymentMethods')} divider />
+        <ListItem title="Ahorro en común" subtitle="Anotar un depósito" leading={<IconCircle name="trending-up-outline" tone="primary" />} onPress={() => navigation.navigate('AddSavings')} />
+      </Card>
+
       <SectionHeader title="Patrimonio y deudas" />
       <Card padding="md">
         <ListItem title="Vehículos" subtitle="Permiso, revisión técnica, SOAP y seguro" leading={<IconCircle name="car-sport-outline" tone="primary" />} onPress={() => navigation.navigate('Vehicles')} divider />
         <ListItem title="Propiedades" subtitle="Dividendo pagado y arriendo recibido" leading={<IconCircle name="home-outline" tone="primary" />} onPress={() => navigation.navigate('Properties')} divider />
-        <ListItem title="Créditos" subtitle="Cuotas pagadas y cuánto falta" leading={<IconCircle name="card-outline" tone="primary" />} onPress={() => navigation.navigate('Loans')} />
+        <ListItem title="Créditos" subtitle="Cuotas pagadas y cuánto falta" leading={<IconCircle name="document-text-outline" tone="primary" />} onPress={() => navigation.navigate('Loans')} />
       </Card>
     </Screen>
   );
