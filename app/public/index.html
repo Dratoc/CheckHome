@@ -3,8 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
-    <!-- viewport-fit=cover: en el iPhone instalado la app usa toda la pantalla y respeta la muesca con safe-area -->
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+    <!-- viewport-fit=cover: en el iPhone instalado la app usa toda la pantalla y respeta la muesca con safe-area.
+         interactive-widget=resizes-content: en Chrome de Android el teclado achica la página en vez de taparla. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>CheckHome</title>
     <!-- Versión web instalable (PWA): en el iPhone, Safari → Compartir → "Agregar a pantalla de inicio" -->
     <link rel="manifest" href="/manifest.webmanifest" />

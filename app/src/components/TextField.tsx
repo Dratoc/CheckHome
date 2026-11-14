@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { TextInput, View, type TextInputProps } from 'react-native';
+import { useRef, useState } from 'react';
+import { TextInput, View, type TextInputProps, type ViewInstance } from 'react-native';
 import { useTheme } from '../theme';
+import { useKeyboardAware } from './keyboard';
 import { Text } from './Text';
 
 type TextFieldProps = Omit<TextInputProps, 'style'> & {
@@ -15,10 +16,13 @@ type TextFieldProps = Omit<TextInputProps, 'style'> & {
 export function TextField({ label, hint, error, prefix, onFocus, onBlur, ...rest }: TextFieldProps) {
   const t = useTheme();
   const [focused, setFocused] = useState(false);
+  const keyboard = useKeyboardAware();
+  // Se mide el campo completo (etiqueta, caja y ayuda/error) para que todo quede sobre el teclado.
+  const container = useRef<ViewInstance>(null);
   const borderColor = error ? t.colors.danger : focused ? t.colors.primary : t.colors.border;
 
   return (
-    <View style={{ gap: t.spacing.xs + t.spacing.xxs }}>
+    <View ref={container} style={{ gap: t.spacing.xs + t.spacing.xxs }}>
       <Text variant="label" color="text">
         {label}
       </Text>
@@ -48,6 +52,7 @@ export function TextField({ label, hint, error, prefix, onFocus, onBlur, ...rest
           cursorColor={t.colors.primary}
           onFocus={(e) => {
             setFocused(true);
+            keyboard?.reveal(container.current);
             onFocus?.(e);
           }}
           onBlur={(e) => {
