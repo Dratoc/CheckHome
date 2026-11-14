@@ -41,6 +41,8 @@ export type IncomeSource = {
   payDay: number;
   expectedAmount: number;
   isPrivate: boolean;
+  /** Arriendo: la propiedad que lo genera */
+  propertyId?: number;
 };
 
 export type Income = {
@@ -80,15 +82,25 @@ export type Obligation = {
   /** Solo créditos: cuotas totales y pagadas */
   installmentsTotal?: number;
   installmentsPaid?: number;
+  /** Papeles del auto: el vehículo al que pertenecen */
+  vehicleId?: number;
+  vehicleName?: string;
+  /** Dividendo: la propiedad que se paga */
+  propertyId?: number;
+  propertyName?: string;
 };
 
 export type ObligationPayment = {
   id: number;
   obligationId: number;
   userId: number;
+  /** Nombre de quien pagó */
+  paidBy: string;
   amountClp: number;
   ufValue?: number;
   paidOn: string;
+  /** Solo el último pago se puede deshacer */
+  canUndo: boolean;
 };
 
 export type Frequency = 'daily' | 'weekly';
@@ -126,12 +138,21 @@ export type TaskVote = { taskId: number; userId: number; points: number };
 /** Fila unificada para la lista de movimientos. */
 export type Movement = {
   key: string;
+  /** Id del gasto, ingreso o pago según kind */
+  id: number;
+  /** Solo pagos: la cuenta a la que pertenece */
+  obligationId?: number;
   kind: 'income' | 'expense' | 'payment';
   title: string;
   subtitle: string;
   amount: number;
   date: string;
 };
+
+/** Gasto visto por quien lo abre: si puede cambiarlo (lo anotó o es administrador). */
+export type ExpenseView = Expense & { canEdit: boolean };
+
+export type IncomeView = Income & { sourceName: string };
 
 export type ObligationStatus = 'overdue' | 'due_soon' | 'ok';
 
@@ -148,3 +169,31 @@ export type MonthSummary = {
 export type RankingRow = { user: Member; points: number };
 
 export type BacklogTaskView = BacklogTask & { votes: TaskVote[]; myVote?: number; pendingVoters: number };
+
+export type Vehicle = {
+  id: number;
+  householdId: number;
+  name: string;
+  /** Patente, sin espacios ni guiones */
+  plate?: string;
+  model?: string;
+  year?: number;
+};
+
+/** Vehículo con sus papeles (permiso, revisión técnica, SOAP, seguro). */
+export type VehicleView = Vehicle & { documents: ObligationView[] };
+
+export type Property = {
+  id: number;
+  householdId: number;
+  name: string;
+  address?: string;
+};
+
+/** Propiedad con su dividendo, su arriendo y lo pagado y recibido este mes. */
+export type PropertyView = Property & {
+  mortgages: ObligationView[];
+  rentSources: IncomeSource[];
+  rentThisMonth: number;
+  mortgagePaidThisMonth: number;
+};

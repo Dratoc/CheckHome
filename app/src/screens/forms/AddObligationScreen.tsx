@@ -1,11 +1,12 @@
-import { useState } from 'react';
-import { Button, ChoiceChips, Screen, SegmentedControl, Text, TextField, type Choice } from '../../components';
-import { useMutation } from '../../hooks/useQuery';
+import { useEffect, useState } from 'react';
+import { Button, ChoiceChips, LoadingState, Screen, SegmentedControl, Text, TextField, type Choice } from '../../components';
+import { useMutation, useQuery } from '../../hooks/useQuery';
 import type { RootScreenProps } from '../../navigation/types';
 import * as api from '../../services/api';
 import type { ObligationKind } from '../../services/types';
 import { useHousehold } from '../../state/SessionProvider';
-import { parseUserDate } from '../../utils/dates';
+import { confirmDanger } from '../../utils/confirm';
+import { parseUserDate, toUserDate } from '../../utils/dates';
 import { obligationIcon } from '../tabs/obligationUi';
 import { parseClp, parseDecimal, showClp } from './money';
 
@@ -27,20 +28,51 @@ const PLACEHOLDER: Record<ObligationKind, string> = {
   other: 'Ej: Gastos comunes',
 };
 
-/** Nueva cuenta por pagar: servicios, suscripciones, dividendo, créditos y papeles del auto. */
-export function AddObligationScreen({ navigation }: RootScreenProps<'AddObligation'>) {
+const saveObligation = (householdId: number, obligationId: number | undefined, input: api.ObligationInput) =>
+  obligationId ? api.updateObligation(obligationId, input) : api.createObligation(householdId, input);
+
+/** Nueva cuenta por pagar: servicios, suscripciones, dividendo, créditos y papeles del auto. Con obligationId, la edita. */
+export function AddObligationScreen({ navigation, route }: RootScreenProps<'AddObligation'>) {
   const { household } = useHousehold();
-  const save = useMutation(api.createObligation);
-  const [kind, setKind] = useState<ObligationKind>();
+  const obligationId = route.params?.obligationId;
+  const preset = route.params;
+  const vehicles = useQuery(() => api.listVehicles(household.id), [household.id]);
+  const properties = useQuery(() => api.listProperties(household.id), [household.id]);
+  const existing = useQuery(() => (obligationId ? api.getObligation(obligationId) : Promise.resolve(undefined)), [obligationId]);
+  const save = useMutation(saveObligation);
+  const remove = useMutation(api.deleteObligation);
+  const [kind, setKind] = useState<ObligationKind | undefined>(preset?.kind);
+  // 0 = no ligada a ningún vehículo o propiedad
+  const [vehicleId, setVehicleId] = useState(preset?.vehicleId ?? 0);
+  const [propertyId, setPropertyId] = useState(preset?.propertyId ?? 0);
   const [name, setName] = useState('');
   const [currency, setCurrency] = useState<'CLP' | 'UF'>('CLP');
   const [rawAmount, setRawAmount] = useState('');
   const [due, setDue] = useState('');
-  const [every, setEvery] = useState<'1' | '12'>('1');
+  const [every, setEvery] = useState<'1' | '12'>(preset?.kind === 'vehicle_doc' ? '12' : '1');
   const [account, setAccount] = useState('');
   const [total, setTotal] = useState('');
   const [paid, setPaid] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [filled, setFilled] = useState(false);
+
+  // Al editar, se rellena el formulario una sola vez con la cuenta guardada.
+  const o = existing.data;
+  useEffect(() => {
+    if (!o || filled) return;
+    setKind(o.kind);
+    setName(o.name);
+    setCurrency(o.currency);
+    setRawAmount(o.currency === 'UF' ? String(o.amount).replace('.', ',') : String(o.amount));
+    setDue(toUserDate(o.nextDueOn));
+    setEvery(o.everyMonths === 12 ? '12' : '1');
+    setAccount(o.accountNumber ?? '');
+    setTotal(o.installmentsTotal ? String(o.installmentsTotal) : '');
+    setPaid(o.installmentsPaid != null ? String(o.installmentsPaid) : '');
+    setVehicleId(o.vehicleId ?? 0);
+    setPropertyId(o.propertyId ?? 0);
+    setFilled(true);
+  }, [o, filled]);
 
   const pickKind = (k: ObligationKind) => {
     setKind(k);
@@ -65,7 +97,7 @@ export function AddObligationScreen({ navigation }: RootScreenProps<'AddObligati
   const submit = async () => {
     setSubmitted(true);
     if (Object.values(errors).some(Boolean) || !kind || !nextDueOn) return;
-    const o = await save.run(household.id, {
+    const saved = await save.run(household.id, obligationId, {
       kind,
       name: name.trim(),
       currency,
@@ -75,13 +107,41 @@ export function AddObligationScreen({ navigation }: RootScreenProps<'AddObligati
       accountNumber: account.trim() || undefined,
       installmentsTotal,
       installmentsPaid,
+      vehicleId: kind === 'vehicle_doc' && vehicleId ? vehicleId : undefined,
+      propertyId: kind === 'mortgage' && propertyId ? propertyId : undefined,
     });
-    if (o) navigation.goBack();
+    if (saved) navigation.goBack();
   };
+
+  const onDelete = async () => {
+    if (!obligationId) return;
+    const ok = await confirmDanger(`¿Eliminar ${name.trim() || 'esta cuenta'}?`, 'También se borra su historial de pagos. No se puede recuperar.');
+    if (ok && (await remove.run(obligationId))) navigation.popToTop();
+  };
+
+  if (obligationId && !filled) {
+    return <Screen edges={['bottom']}>{existing.error ? <Text color="danger">{existing.error}</Text> : <LoadingState />}</Screen>;
+  }
 
   return (
     <Screen edges={['bottom']}>
       <ChoiceChips label="Tipo" options={KINDS} value={kind} onChange={pickKind} error={show('kind')} />
+      {kind === 'vehicle_doc' && (vehicles.data?.length ?? 0) > 0 && (
+        <ChoiceChips<number>
+          label="Vehículo"
+          options={[...(vehicles.data ?? []).map((v) => ({ value: v.id, label: v.name, icon: 'car-sport-outline' as const })), { value: 0, label: 'Ninguno' }]}
+          value={vehicleId}
+          onChange={setVehicleId}
+        />
+      )}
+      {kind === 'mortgage' && (properties.data?.length ?? 0) > 0 && (
+        <ChoiceChips<number>
+          label="Propiedad"
+          options={[...(properties.data ?? []).map((p) => ({ value: p.id, label: p.name, icon: 'home-outline' as const })), { value: 0, label: 'Ninguna' }]}
+          value={propertyId}
+          onChange={setPropertyId}
+        />
+      )}
       <TextField label="Nombre" value={name} onChangeText={setName} placeholder={kind ? PLACEHOLDER[kind] : 'Ej: Luz'} error={show('name')} maxLength={100} />
       {(kind === 'mortgage' || kind === 'loan') && (
         <SegmentedControl<'CLP' | 'UF'>
@@ -116,12 +176,13 @@ export function AddObligationScreen({ navigation }: RootScreenProps<'AddObligati
       {(kind === 'utility' || kind === 'subscription') && (
         <TextField label="Número de cliente (opcional)" value={account} onChangeText={setAccount} placeholder="Para tenerlo a mano al pagar" maxLength={50} />
       )}
-      {save.error && (
+      {(save.error || remove.error) && (
         <Text color="danger" accessibilityRole="alert">
-          {save.error}
+          {save.error ?? remove.error}
         </Text>
       )}
-      <Button label="Guardar cuenta" size="lg" block loading={save.pending} onPress={submit} />
+      <Button label={obligationId ? 'Guardar cambios' : 'Guardar cuenta'} size="lg" block loading={save.pending} onPress={submit} />
+      {obligationId && <Button label="Eliminar cuenta" variant="ghost" block loading={remove.pending} onPress={onDelete} />}
     </Screen>
   );
 }

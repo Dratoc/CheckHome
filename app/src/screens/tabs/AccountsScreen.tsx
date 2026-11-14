@@ -11,6 +11,7 @@ import {
   ProgressBar,
   QueryView,
   Screen,
+  SectionHeader,
   SegmentedControl,
   Text,
 } from '../../components';
@@ -18,7 +19,7 @@ import { useMutation, useQuery } from '../../hooks/useQuery';
 import { ExpenseFab } from '../../navigation/ExpenseFab';
 import type { TabScreenProps } from '../../navigation/types';
 import * as api from '../../services/api';
-import type { IncomeSource, ObligationView } from '../../services/types';
+import type { IncomeSource, Movement, ObligationView } from '../../services/types';
 import { useHousehold } from '../../state/SessionProvider';
 import { useTheme } from '../../theme';
 import { obligationBadge, obligationIcon, obligationSubtitle } from './obligationUi';
@@ -27,8 +28,14 @@ type Section = 'movements' | 'obligations' | 'income';
 
 /** Cuentas: movimientos del hogar, cuentas por pagar y fuentes de ingreso. */
 export function AccountsScreen({ navigation }: TabScreenProps<'Accounts'>) {
-  const t = useTheme();
   const [section, setSection] = useState<Section>('movements');
+
+  // Tocar un movimiento abre lo que lo originó: el gasto, el ingreso o la cuenta pagada.
+  const openMovement = (m: Movement) => {
+    if (m.kind === 'expense') navigation.navigate('AddExpense', { expenseId: m.id });
+    else if (m.kind === 'income') navigation.navigate('EditIncome', { incomeId: m.id });
+    else if (m.obligationId) navigation.navigate('ObligationDetail', { obligationId: m.obligationId, name: m.title });
+  };
 
   return (
     <Screen edges={['top']} overlay={<ExpenseFab />}>
@@ -44,26 +51,25 @@ export function AccountsScreen({ navigation }: TabScreenProps<'Accounts'>) {
           { value: 'income', label: 'Ingresos' },
         ]}
       />
-      {section === 'movements' && <Movements onAdd={() => navigation.navigate('AddExpense')} />}
-      {section === 'obligations' && <Obligations onAdd={() => navigation.navigate('AddObligation')} />}
+      {section === 'movements' && <Movements onAdd={() => navigation.navigate('AddExpense')} onOpen={openMovement} />}
+      {section === 'obligations' && (
+        <Obligations onAdd={() => navigation.navigate('AddObligation')} onOpen={(o) => navigation.navigate('ObligationDetail', { obligationId: o.id, name: o.name })} />
+      )}
       {section === 'income' && (
-        <IncomeSources
-          onAdd={() => navigation.navigate('AddIncomeSource')}
-          onReceive={(s) => navigation.navigate('AddIncome', { sourceId: s.id, name: s.name, expectedAmount: s.expectedAmount, isPrivate: s.isPrivate })}
-        />
+        <IncomeSources onAdd={() => navigation.navigate('AddIncomeSource')} onReceive={(s) => navigation.navigate('AddIncome', { source: s })} />
       )}
 
-      <Card padding="md" style={{ marginTop: t.spacing.sm }}>
-        <Text variant="label">Próximamente</Text>
-        <Text variant="caption" color="textMuted">
-          Vehículos, propiedades y créditos en detalle llegan en la fase 4 del MVP.
-        </Text>
+      <SectionHeader title="Patrimonio y deudas" />
+      <Card padding="md">
+        <ListItem title="Vehículos" subtitle="Permiso, revisión técnica, SOAP y seguro" leading={<IconCircle name="car-sport-outline" tone="primary" />} onPress={() => navigation.navigate('Vehicles')} divider />
+        <ListItem title="Propiedades" subtitle="Dividendo pagado y arriendo recibido" leading={<IconCircle name="home-outline" tone="primary" />} onPress={() => navigation.navigate('Properties')} divider />
+        <ListItem title="Créditos" subtitle="Cuotas pagadas y cuánto falta" leading={<IconCircle name="card-outline" tone="primary" />} onPress={() => navigation.navigate('Loans')} />
       </Card>
     </Screen>
   );
 }
 
-function Movements({ onAdd }: { onAdd: () => void }) {
+function Movements({ onAdd, onOpen }: { onAdd: () => void; onOpen: (m: Movement) => void }) {
   const { user, household } = useHousehold();
   const query = useQuery(() => api.listMovements(household.id, user.id), [household.id, user.id]);
   return (
@@ -86,6 +92,7 @@ function Movements({ onAdd }: { onAdd: () => void }) {
                 />
               }
               trailing={<Amount value={m.amount} sign={m.kind === 'income' ? 'income' : 'expense'} />}
+              onPress={() => onOpen(m)}
               divider={i < rows.length - 1}
             />
           ))
@@ -95,7 +102,7 @@ function Movements({ onAdd }: { onAdd: () => void }) {
   );
 }
 
-function Obligations({ onAdd }: { onAdd: () => void }) {
+function Obligations({ onAdd, onOpen }: { onAdd: () => void; onOpen: (o: ObligationView) => void }) {
   const { user, household } = useHousehold();
   const query = useQuery(() => api.listObligations(household.id), [household.id]);
   const pay = useMutation(api.payObligation);
@@ -122,7 +129,7 @@ function Obligations({ onAdd }: { onAdd: () => void }) {
         <>
           {pay.error && <Text color="danger">{pay.error}</Text>}
           {rows.map((o) => (
-            <ObligationCard key={o.id} o={o} paying={payingId === o.id} onPay={() => onPay(o)} />
+            <ObligationCard key={o.id} o={o} paying={payingId === o.id} onPay={() => onPay(o)} onOpen={() => onOpen(o)} />
           ))}
           <Button label="Agregar cuenta" variant="secondary" block onPress={onAdd} />
         </>
@@ -131,11 +138,11 @@ function Obligations({ onAdd }: { onAdd: () => void }) {
   );
 }
 
-function ObligationCard({ o, paying, onPay }: { o: ObligationView; paying: boolean; onPay: () => void }) {
+function ObligationCard({ o, paying, onPay, onOpen }: { o: ObligationView; paying: boolean; onPay: () => void; onOpen: () => void }) {
   const t = useTheme();
   const b = obligationBadge(o);
   return (
-    <Card padding="md">
+    <Card padding="md" onPress={onOpen} accessibilityLabel={`${o.name}: ver detalle e historial de pagos`}>
       <ListItem
         title={o.name}
         subtitle={obligationSubtitle(o)}

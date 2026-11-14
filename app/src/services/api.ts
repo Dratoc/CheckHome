@@ -2,17 +2,24 @@ import type {
   BacklogTaskView,
   Category,
   Expense,
+  ExpenseView,
   Frequency,
   IncomeSource,
+  IncomeView,
   Member,
   MonthSummary,
   Movement,
   MyHousehold,
   ObligationKind,
+  ObligationPayment,
   ObligationView,
+  Property,
+  PropertyView,
   RankingRow,
   Routine,
   User,
+  Vehicle,
+  VehicleView,
 } from './types';
 
 /**
@@ -86,6 +93,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 const get = <T>(path: string) => request<T>('GET', path);
 const post = <T = void>(path: string, body: unknown = {}) => request<T>('POST', path, body);
+const patch = <T = void>(path: string, body: unknown) => request<T>('PATCH', path, body);
+/** Borra y resuelve true, para que useMutation distinga éxito (true) de error (undefined). */
+const del = (path: string) => request<void>('DELETE', path).then(() => true as const);
 
 /** Normaliza lo que escribe la persona: sin espacios ni guiones, en mayúscula. */
 export function normalizeInviteCode(raw: string) {
@@ -152,10 +162,34 @@ export type ObligationInput = {
   accountNumber?: string;
   installmentsTotal?: number;
   installmentsPaid?: number;
+  vehicleId?: number;
+  propertyId?: number;
 };
 
 export function createObligation(householdId: number, input: ObligationInput): Promise<ObligationView> {
   return post(`/households/${householdId}/obligations`, input);
+}
+
+export function getObligation(obligationId: number): Promise<ObligationView> {
+  return get(`/obligations/${obligationId}`);
+}
+
+export function updateObligation(obligationId: number, input: ObligationInput): Promise<ObligationView> {
+  return patch(`/obligations/${obligationId}`, input);
+}
+
+/** Borra la cuenta y todo su historial de pagos. */
+export function deleteObligation(obligationId: number) {
+  return del(`/obligations/${obligationId}`);
+}
+
+export function listObligationPayments(obligationId: number): Promise<ObligationPayment[]> {
+  return get(`/obligations/${obligationId}/payments`);
+}
+
+/** Deshace el último "Marcar pagado": el vencimiento vuelve un período atrás. */
+export function undoObligationPayment(paymentId: number) {
+  return del(`/obligation-payments/${paymentId}`);
 }
 
 export function payObligation(obligationId: number, _userId?: number): Promise<void> {
@@ -170,7 +204,7 @@ export function listIncomeSources(householdId: number, _userId?: number): Promis
   return get(`/households/${householdId}/income-sources`);
 }
 
-export type IncomeSourceInput = { name: string; payDay: number; expectedAmount: number; isPrivate: boolean };
+export type IncomeSourceInput = { name: string; payDay: number; expectedAmount: number; isPrivate: boolean; propertyId?: number };
 
 export function createIncomeSource(householdId: number, input: IncomeSourceInput): Promise<IncomeSource> {
   return post(`/households/${householdId}/income-sources`, input);
@@ -181,6 +215,27 @@ export function addIncome(sourceId: number, amount: number, receivedOn?: string)
   return post(`/income-sources/${sourceId}/incomes`, { amount, receivedOn });
 }
 
+export function updateIncomeSource(sourceId: number, input: IncomeSourceInput): Promise<IncomeSource> {
+  return patch(`/income-sources/${sourceId}`, input);
+}
+
+/** Borra la fuente y todos los pagos anotados en ella. */
+export function deleteIncomeSource(sourceId: number) {
+  return del(`/income-sources/${sourceId}`);
+}
+
+export function getIncome(incomeId: number): Promise<IncomeView> {
+  return get(`/incomes/${incomeId}`);
+}
+
+export function updateIncome(incomeId: number, amount: number, receivedOn: string): Promise<IncomeView> {
+  return patch(`/incomes/${incomeId}`, { amount, receivedOn });
+}
+
+export function deleteIncome(incomeId: number) {
+  return del(`/incomes/${incomeId}`);
+}
+
 export function listExpenseCategories(householdId: number): Promise<Category[]> {
   return get(`/households/${householdId}/categories?kind=expense`);
 }
@@ -189,6 +244,58 @@ export type ExpenseInput = { amount: number; categoryId: number; description: st
 
 export function addExpense(householdId: number, _userId: number, input: ExpenseInput): Promise<Expense> {
   return post(`/households/${householdId}/expenses`, input);
+}
+
+export function getExpense(expenseId: number): Promise<ExpenseView> {
+  return get(`/expenses/${expenseId}`);
+}
+
+export function updateExpense(expenseId: number, input: ExpenseInput & { spentOn: string }): Promise<ExpenseView> {
+  return patch(`/expenses/${expenseId}`, input);
+}
+
+export function deleteExpense(expenseId: number) {
+  return del(`/expenses/${expenseId}`);
+}
+
+// ---------- Vehículos y propiedades ----------
+
+export type VehicleInput = { name: string; plate?: string; model?: string; year?: number };
+
+export function listVehicles(householdId: number): Promise<VehicleView[]> {
+  return get(`/households/${householdId}/vehicles`);
+}
+
+export function createVehicle(householdId: number, input: VehicleInput): Promise<Vehicle> {
+  return post(`/households/${householdId}/vehicles`, input);
+}
+
+export function updateVehicle(vehicleId: number, input: VehicleInput): Promise<Vehicle> {
+  return patch(`/vehicles/${vehicleId}`, input);
+}
+
+/** Borra el vehículo; sus papeles quedan como cuentas sueltas. */
+export function deleteVehicle(vehicleId: number) {
+  return del(`/vehicles/${vehicleId}`);
+}
+
+export type PropertyInput = { name: string; address?: string };
+
+export function listProperties(householdId: number): Promise<PropertyView[]> {
+  return get(`/households/${householdId}/properties`);
+}
+
+export function createProperty(householdId: number, input: PropertyInput): Promise<Property> {
+  return post(`/households/${householdId}/properties`, input);
+}
+
+export function updateProperty(propertyId: number, input: PropertyInput): Promise<Property> {
+  return patch(`/properties/${propertyId}`, input);
+}
+
+/** Borra la propiedad; su dividendo y arriendo quedan como cuentas e ingresos sueltos. */
+export function deleteProperty(propertyId: number) {
+  return del(`/properties/${propertyId}`);
 }
 
 // ---------- Tareas ----------
@@ -203,6 +310,14 @@ export type RoutineInput = { name: string; frequency: Frequency; points: number 
 
 export function createRoutine(householdId: number, input: RoutineInput): Promise<Routine> {
   return post(`/households/${householdId}/routines`, input);
+}
+
+export function updateRoutine(routineId: number, input: RoutineInput): Promise<Routine> {
+  return patch(`/routines/${routineId}`, input);
+}
+
+export function deleteRoutine(routineId: number) {
+  return del(`/routines/${routineId}`);
 }
 
 export function toggleRoutine(routineId: number, _userId?: number): Promise<void> {
@@ -230,6 +345,14 @@ export function takeTask(taskId: number, _userId?: number): Promise<void> {
 
 export function completeTask(taskId: number, _userId?: number): Promise<void> {
   return post(`/backlog/${taskId}/complete`);
+}
+
+export function renameTask(taskId: number, title: string) {
+  return patch(`/backlog/${taskId}`, { title }).then(() => true as const);
+}
+
+export function deleteTask(taskId: number) {
+  return del(`/backlog/${taskId}`);
 }
 
 /** Puntos de la semana: rutinas marcadas + tareas del backlog terminadas. */

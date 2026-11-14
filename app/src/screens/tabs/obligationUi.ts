@@ -21,5 +21,6 @@ export function obligationBadge(o: ObligationView): { label: string; tone: Badge
 export function obligationSubtitle(o: ObligationView) {
   const due = o.status === 'overdue' ? `Venció ${relativeDays(o.daysLeft).toLowerCase()}` : `Vence ${formatShortDate(o.nextDueOn)}`;
   const extra = o.installmentsTotal ? ` · Cuota ${(o.installmentsPaid ?? 0) + 1} de ${o.installmentsTotal}` : o.currency === 'UF' ? ` · UF ${o.amount.toFixed(2).replace('.', ',')}` : '';
-  return due + extra;
+  const owner = o.vehicleName ?? o.propertyName;
+  return (owner ? `${owner} · ` : '') + due + extra;
 }

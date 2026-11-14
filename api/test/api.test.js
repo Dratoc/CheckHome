@@ -128,3 +128,140 @@ test('flujo completo de dos personas en un hogar', { skip: !cs && 'sin TEST_SQL_
   assert.equal(rank[0].user.username, `beto${sfx}`);
   assert.equal(rank[0].points, 10);
 });
+
+test('editar, borrar e historial de pagos', { skip: !cs && 'sin TEST_SQL_CONNECTION_STRING' }, async () => {
+  const sfx = 'e' + Date.now().toString(36);
+  const a = (await call('POST', '/auth/register', { email: `a${sfx}@x.cl`, username: `ana${sfx}`, displayName: 'Ana', password: 'secreta123' })).body;
+  const b = (await call('POST', '/auth/register', { email: `b${sfx}@x.cl`, username: `beto${sfx}`, displayName: 'Beto', password: 'secreta123' })).body;
+  const c = (await call('POST', '/auth/register', { email: `c${sfx}@x.cl`, username: `caro${sfx}`, displayName: 'Caro', password: 'secreta123' })).body;
+  const ta = a.token;
+  const tb = b.token;
+  const hh = (await call('POST', '/households', { name: 'Casa' }, ta)).body;
+  const hid = hh.id;
+  await call('POST', '/households/join', { code: hh.inviteCode }, tb);
+
+  // Gastos: quien lo anotó o un admin; alguien de otro hogar no lo ve.
+  const cats = (await call('GET', `/households/${hid}/categories`, null, ta)).body;
+  const expA = (await call('POST', `/households/${hid}/expenses`, { amount: 1000, categoryId: cats[0].id, description: 'Pan' }, ta)).body;
+  const expB = (await call('POST', `/households/${hid}/expenses`, { amount: 2000, categoryId: cats[1].id }, tb)).body;
+  assert.equal((await call('GET', `/expenses/${expA.id}`, null, tb)).body.canEdit, false);
+  assert.equal((await call('GET', `/expenses/${expA.id}`, null, c.token)).status, 403);
+  assert.equal((await call('PATCH', `/expenses/${expA.id}`, { amount: 5, categoryId: cats[0].id }, tb)).status, 403);
+  const edited = await call('PATCH', `/expenses/${expA.id}`, { amount: 1500, categoryId: cats[2].id, description: 'Pan y huevos', spentOn: '2026-01-02' }, ta);
+  assert.equal(edited.status, 200, JSON.stringify(edited.body));
+  assert.equal(edited.body.amount, 1500);
+  assert.equal(edited.body.spentOn, '2026-01-02');
+  assert.equal((await call('DELETE', `/expenses/${expB.id}`, null, ta)).status, 204, 'el admin puede borrar');
+  assert.equal((await call('GET', `/expenses/${expB.id}`, null, ta)).status, 404);
+
+  // Ingresos: solo su dueño los cambia; al hacer privada la fuente, sus pagos también quedan privados.
+  const src = (await call('POST', `/households/${hid}/income-sources`, { name: 'Sueldo', payDay: 1, expectedAmount: 500000, isPrivate: false }, ta)).body;
+  await call('POST', `/income-sources/${src.id}/incomes`, { amount: 500000 }, ta);
+  const incomeMov = (await call('GET', `/households/${hid}/movements`, null, tb)).body.find((m) => m.kind === 'income');
+  assert.ok(incomeMov?.id);
+  assert.equal((await call('PATCH', `/incomes/${incomeMov.id}`, { amount: 1, receivedOn: '2026-01-01' }, tb)).status, 403);
+  const inc = await call('PATCH', `/incomes/${incomeMov.id}`, { amount: 510000, receivedOn: '2026-11-01' }, ta);
+  assert.equal(inc.body.amount, 510000);
+  assert.equal(inc.body.sourceName, 'Sueldo');
+  assert.equal((await call('PATCH', `/income-sources/${src.id}`, { name: 'Sueldo Ana', payDay: 5, expectedAmount: 510000, isPrivate: true }, tb)).status, 403);
+  const src2 = await call('PATCH', `/income-sources/${src.id}`, { name: 'Sueldo Ana', payDay: 5, expectedAmount: 510000, isPrivate: true }, ta);
+  assert.equal(src2.body.isPrivate, true);
+  assert.equal((await call('GET', `/incomes/${incomeMov.id}`, null, tb)).status, 404, 'ahora es privado');
+  assert.equal((await call('DELETE', `/income-sources/${src.id}`, null, ta)).status, 204);
+  assert.equal((await call('GET', `/incomes/${incomeMov.id}`, null, ta)).status, 404, 'se borra con su fuente');
+
+  // Cuentas fijas: editar, historial, deshacer el último pago y borrar.
+  const ob = (await call('POST', `/households/${hid}/obligations`, { kind: 'loan', name: 'Crédito', amount: 100000, nextDueOn: '2026-03-10', installmentsTotal: 10, installmentsPaid: 4 }, ta)).body;
+  const obEdit = await call('PATCH', `/obligations/${ob.id}`, { kind: 'loan', name: 'Crédito auto', amount: 120000, nextDueOn: '2026-03-15', everyMonths: 1, installmentsTotal: 12, installmentsPaid: 4 }, tb);
+  assert.equal(obEdit.status, 200, JSON.stringify(obEdit.body));
+  assert.equal(obEdit.body.name, 'Crédito auto');
+  assert.equal(obEdit.body.installmentsTotal, 12);
+  await call('POST', `/obligations/${ob.id}/pay`, {}, ta);
+  await call('POST', `/obligations/${ob.id}/pay`, {}, tb);
+  const pays = (await call('GET', `/obligations/${ob.id}/payments`, null, ta)).body;
+  assert.equal(pays.length, 2);
+  assert.deepEqual(pays.map((p) => p.canUndo), [true, false]);
+  assert.equal(pays[0].amountClp, 120000);
+  assert.equal((await call('DELETE', `/obligation-payments/${pays[1].id}`, null, ta)).status, 409, 'solo el último');
+  assert.equal((await call('DELETE', `/obligation-payments/${pays[0].id}`, null, c.token)).status, 403);
+  assert.equal((await call('DELETE', `/obligation-payments/${pays[0].id}`, null, ta)).status, 204);
+  const after1 = (await call('GET', `/obligations/${ob.id}`, null, ta)).body;
+  assert.equal(after1.nextDueOn, '2026-04-15');
+  assert.equal(after1.installmentsPaid, 5);
+  assert.ok(after1.lastPaidOn);
+  const payMov = (await call('GET', `/households/${hid}/movements`, null, ta)).body.find((m) => m.kind === 'payment');
+  assert.equal(payMov.obligationId, ob.id);
+  assert.equal((await call('DELETE', `/obligations/${ob.id}`, null, tb)).status, 204);
+  assert.equal((await call('GET', `/obligations/${ob.id}`, null, ta)).status, 404);
+
+  // Rutinas y backlog.
+  const r = (await call('POST', `/households/${hid}/routines`, { name: 'Loza', frequency: 'daily', points: 2 }, ta)).body;
+  await call('POST', `/routines/${r.id}/toggle`, {}, tb);
+  const rEdit = await call('PATCH', `/routines/${r.id}`, { name: 'Lavar loza', frequency: 'weekly', points: 3 }, tb);
+  assert.deepEqual([rEdit.body.name, rEdit.body.frequency, rEdit.body.points], ['Lavar loza', 'weekly', 3]);
+  assert.equal((await call('DELETE', `/routines/${r.id}`, null, ta)).status, 204);
+  assert.equal((await call('GET', `/households/${hid}/routines`, null, ta)).body.length, 0);
+
+  await call('POST', `/households/${hid}/backlog`, { title: 'Pintar' }, ta);
+  const [task] = (await call('GET', `/households/${hid}/backlog`, null, ta)).body;
+  await call('POST', `/backlog/${task.id}/vote`, { points: 5 }, tb);
+  assert.equal((await call('PATCH', `/backlog/${task.id}`, { title: 'x' }, ta)).status, 400);
+  assert.equal((await call('PATCH', `/backlog/${task.id}`, { title: 'Pintar la reja' }, ta)).status, 204);
+  assert.equal((await call('GET', `/households/${hid}/backlog`, null, ta)).body[0].title, 'Pintar la reja');
+  assert.equal((await call('DELETE', `/backlog/${task.id}`, null, c.token)).status, 403);
+  assert.equal((await call('DELETE', `/backlog/${task.id}`, null, tb)).status, 204);
+  assert.equal((await call('GET', `/households/${hid}/backlog`, null, ta)).body.length, 0);
+});
+
+test('vehículos con papeles y propiedades con dividendo y arriendo', { skip: !cs && 'sin TEST_SQL_CONNECTION_STRING' }, async () => {
+  const sfx = 'v' + Date.now().toString(36);
+  const a = (await call('POST', '/auth/register', { email: `a${sfx}@x.cl`, username: `ana${sfx}`, displayName: 'Ana', password: 'secreta123' })).body;
+  const b = (await call('POST', '/auth/register', { email: `b${sfx}@x.cl`, username: `beto${sfx}`, displayName: 'Beto', password: 'secreta123' })).body;
+  const ta = a.token;
+  const tb = b.token;
+  const hh = (await call('POST', '/households', { name: 'Casa' }, ta)).body;
+  const hid = hh.id;
+  await call('POST', '/households/join', { code: hh.inviteCode }, tb);
+  const other = (await call('POST', '/households', { name: 'Otra' }, tb)).body;
+
+  // Vehículo con dos papeles.
+  const car = await call('POST', `/households/${hid}/vehicles`, { name: 'Auto', plate: 'ab-cd 12', model: 'Toyota Yaris', year: 2019 }, ta);
+  assert.equal(car.status, 201, JSON.stringify(car.body));
+  assert.equal(car.body.plate, 'ABCD12');
+  assert.equal((await call('POST', `/households/${hid}/vehicles`, { name: 'X', year: 1800 }, ta)).status, 400);
+  const permiso = await call('POST', `/households/${hid}/obligations`, { kind: 'vehicle_doc', name: 'Permiso de circulación', amount: 180000, nextDueOn: '2027-03-31', everyMonths: 12, vehicleId: car.body.id }, tb);
+  assert.equal(permiso.status, 201, JSON.stringify(permiso.body));
+  assert.equal(permiso.body.vehicleName, 'Auto');
+  await call('POST', `/households/${hid}/obligations`, { kind: 'vehicle_doc', name: 'SOAP', amount: 9000, nextDueOn: '2027-03-31', everyMonths: 12, vehicleId: car.body.id }, ta);
+  const foreignCar = (await call('POST', `/households/${other.id}/vehicles`, { name: 'Ajeno' }, tb)).body;
+  assert.equal((await call('POST', `/households/${hid}/obligations`, { kind: 'vehicle_doc', name: 'SOAP', amount: 1, nextDueOn: '2027-03-31', vehicleId: foreignCar.id }, tb)).status, 400, 'vehículo de otro hogar');
+  let vehicles = (await call('GET', `/households/${hid}/vehicles`, null, tb)).body;
+  assert.equal(vehicles.length, 1);
+  assert.deepEqual(vehicles[0].documents.map((d) => d.name).sort(), ['Permiso de circulación', 'SOAP']);
+  assert.equal((await call('PATCH', `/vehicles/${car.body.id}`, { name: 'Yaris', plate: 'ABCD12', model: 'Toyota Yaris', year: 2019 }, tb)).body.name, 'Yaris');
+  assert.equal((await call('DELETE', `/vehicles/${car.body.id}`, null, tb)).status, 204);
+  const loose = (await call('GET', `/obligations/${permiso.body.id}`, null, ta)).body;
+  assert.equal(loose.vehicleId, undefined, 'el papel queda como cuenta suelta');
+  assert.equal(loose.name, 'Permiso de circulación');
+
+  // Propiedad con dividendo en pesos y arriendo privado de Ana.
+  const depto = (await call('POST', `/households/${hid}/properties`, { name: 'Depto', address: 'Calle 1' }, ta)).body;
+  const div = (await call('POST', `/households/${hid}/obligations`, { kind: 'mortgage', name: 'Dividendo depto', amount: 400000, nextDueOn: '2026-01-05', propertyId: depto.id }, ta)).body;
+  assert.equal(div.propertyName, 'Depto');
+  await call('POST', `/obligations/${div.id}/pay`, {}, ta);
+  const rent = (await call('POST', `/households/${hid}/income-sources`, { name: 'Arriendo depto', payDay: 5, expectedAmount: 550000, isPrivate: true, propertyId: depto.id }, ta)).body;
+  assert.equal(rent.propertyId, depto.id);
+  await call('POST', `/income-sources/${rent.id}/incomes`, { amount: 550000 }, ta);
+  const [pa] = (await call('GET', `/households/${hid}/properties`, null, ta)).body;
+  assert.equal(pa.mortgages.length, 1);
+  assert.equal(pa.rentSources.length, 1);
+  assert.equal(pa.rentThisMonth, 550000);
+  assert.equal(pa.mortgagePaidThisMonth, 400000);
+  const [pb] = (await call('GET', `/households/${hid}/properties`, null, tb)).body;
+  assert.equal(pb.rentSources.length, 0, 'el arriendo privado no se ve');
+  assert.equal(pb.rentThisMonth, 0);
+  assert.equal((await call('PATCH', `/properties/${depto.id}`, { name: 'Depto Ñuñoa' }, tb)).body.name, 'Depto Ñuñoa');
+  assert.equal((await call('DELETE', `/properties/${depto.id}`, null, tb)).status, 204);
+  assert.equal((await call('GET', `/obligations/${div.id}`, null, ta)).body.propertyId, undefined);
+  assert.equal((await call('GET', `/households/${hid}/properties`, null, ta)).body.length, 0);
+});

@@ -60,7 +60,7 @@ TAGS="proyecto=app-hogar entorno=dev"
 ## Estado actual (13 nov 2026)
 
 - Static Web App `swa-checkhome-e20fee` (Free, Central US): https://purple-coast-025bebe10.8.azurestaticapps.net/api
-- SQL `sql-checkhome-e20fee` / base `checkhome` (oferta gratuita, AutoPause), migraciones 0001 y 0002.
+- SQL `sql-checkhome-e20fee` / base `checkhome` (oferta gratuita, AutoPause), migraciones 0001, 0002 y 0003 (14 nov). La clave de `checkhome_admin` no se guarda: para otra migración se resetea con `az sql server update --admin-password`.
 - Firewall: solo `azure-services`. Presupuesto `presupuesto-checkhome` USD 1.
 - Probado: `/health` 200, `/uf` 200 (mindicador), registro 201, `/households` 200 con `X-CheckHome-Token`.
 

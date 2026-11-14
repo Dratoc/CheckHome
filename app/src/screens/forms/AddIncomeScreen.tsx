@@ -3,6 +3,7 @@ import { Button, Screen, Text, TextField } from '../../components';
 import { useMutation } from '../../hooks/useQuery';
 import type { RootScreenProps } from '../../navigation/types';
 import * as api from '../../services/api';
+import { useHousehold } from '../../state/SessionProvider';
 import { parseUserDate, toUserDate, today } from '../../utils/dates';
 import { parseClp, showClp } from './money';
 
@@ -10,7 +11,9 @@ const addIncome = (sourceId: number, amount: number, receivedOn: string) => api.
 
 /** Anota un pago recibido de una fuente de ingreso, en pesos. */
 export function AddIncomeScreen({ navigation, route }: RootScreenProps<'AddIncome'>) {
-  const { sourceId, name, expectedAmount, isPrivate } = route.params;
+  const { source } = route.params;
+  const { id: sourceId, name, expectedAmount, isPrivate } = source;
+  const { user } = useHousehold();
   const save = useMutation(addIncome);
   const [raw, setRaw] = useState(expectedAmount ? String(expectedAmount) : '');
   const [date, setDate] = useState(toUserDate(today()));
@@ -39,6 +42,9 @@ export function AddIncomeScreen({ navigation, route }: RootScreenProps<'AddIncom
         </Text>
       )}
       <Button label="Anotar ingreso" size="lg" block loading={save.pending} onPress={submit} />
+      {source.userId === user.id && (
+        <Button label="Editar o eliminar esta fuente" variant="ghost" block onPress={() => navigation.replace('AddIncomeSource', { source })} />
+      )}
     </Screen>
   );
 }

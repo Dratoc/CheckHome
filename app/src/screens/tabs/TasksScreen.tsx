@@ -1,3 +1,4 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useNavigation } from '@react-navigation/native';
 import { useState } from 'react';
 import { Pressable, View } from 'react-native';
@@ -137,8 +138,9 @@ function Routines() {
               <ListItem
                 key={r.id}
                 title={r.name}
-                subtitle={r.frequency === 'daily' ? 'Todos los días' : 'Una vez por semana'}
+                subtitle={`${r.frequency === 'daily' ? 'Todos los días' : 'Una vez por semana'} · Toca para editar`}
                 trailing={<Badge label={`+${pts(r.points)}`} tone="points" />}
+                onPress={() => navigation.navigate('AddRoutine', { routine: r })}
                 divider
               />
             ))}
@@ -152,6 +154,7 @@ function Routines() {
 
 function Backlog() {
   const t = useTheme();
+  const navigation = useNavigation();
   const { user, household } = useHousehold();
   const query = useQuery(() => api.listBacklog(household.id, user.id), [household.id, user.id]);
   const nameOf = useMembers();
@@ -191,6 +194,15 @@ function Backlog() {
                     {task.title}
                   </Text>
                   {task.points !== undefined && <Badge label={pts(task.points)} tone="points" />}
+                  <Pressable
+                    onPress={() => navigation.navigate('EditTask', { taskId: task.id, title: task.title })}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Editar ${task.title}`}
+                    hitSlop={8}
+                    style={({ pressed }) => ({ padding: t.spacing.xs, opacity: pressed ? 0.6 : 1 })}
+                  >
+                    <Ionicons name="create-outline" size={20} color={t.colors.textMuted} />
+                  </Pressable>
                 </View>
                 {task.status === 'estimating' && (
                   <>
