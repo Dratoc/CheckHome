@@ -4,3 +4,4 @@ node_modules/
 .env.*
 *.apk
 .claude/settings.local.json
+.swa-api/

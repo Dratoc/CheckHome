@@ -74,3 +74,18 @@ export function relativeDays(days: number) {
   if (days === -1) return 'Ayer';
   return days > 0 ? `En ${days} días` : `Hace ${-days} días`;
 }
+
+/** "2026-11-15" → "15-11-2026", para mostrar en un campo de texto. */
+export function toUserDate(iso: string) {
+  const [y, m, d] = iso.split('-');
+  return `${d}-${m}-${y}`;
+}
+
+/** Lee "15-11-2026" o "15/11/2026" y devuelve YYYY-MM-DD, o undefined si no es una fecha real. */
+export function parseUserDate(text: string) {
+  const m = text.trim().match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (!m) return undefined;
+  const iso = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  return toISODate(parseISODate(iso)) === iso ? iso : undefined;
+}
+

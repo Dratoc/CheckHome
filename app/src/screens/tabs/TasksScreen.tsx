@@ -1,3 +1,4 @@
+import { useNavigation } from '@react-navigation/native';
 import { useState } from 'react';
 import { Pressable, View } from 'react-native';
 import {
@@ -73,7 +74,7 @@ function Today() {
       isEmpty={(d) => d.length === 0}
       empty={
         <Card>
-          <EmptyState title="Sin rutinas" message="Las rutinas se definen una vez y se repiten cada día o cada semana." />
+          <EmptyState title="Sin rutinas" message="Créalas en la pestaña Rutinas: se definen una vez y se repiten cada día o cada semana." />
         </Card>
       }
     >
@@ -120,21 +121,30 @@ function Today() {
 
 function Routines() {
   const { household } = useHousehold();
+  const navigation = useNavigation();
   const query = useQuery(() => api.listRoutines(household.id), [household.id]);
+  const add = () => navigation.navigate('AddRoutine');
   return (
     <Card padding="md">
-      <QueryView query={query} isEmpty={(d) => d.length === 0} empty={<EmptyState title="Sin rutinas" message="Pronto podrás crearlas desde aquí." />}>
-        {(rows) =>
-          rows.map((r, i) => (
-            <ListItem
-              key={r.id}
-              title={r.name}
-              subtitle={r.frequency === 'daily' ? 'Todos los días' : 'Una vez por semana'}
-              trailing={<Badge label={`+${pts(r.points)}`} tone="points" />}
-              divider={i < rows.length - 1}
-            />
-          ))
-        }
+      <QueryView
+        query={query}
+        isEmpty={(d) => d.length === 0}
+        empty={<EmptyState title="Sin rutinas" message="Define una vez lo que se hace cada día o cada semana." action="Agregar rutina" onAction={add} />}
+      >
+        {(rows) => (
+          <>
+            {rows.map((r) => (
+              <ListItem
+                key={r.id}
+                title={r.name}
+                subtitle={r.frequency === 'daily' ? 'Todos los días' : 'Una vez por semana'}
+                trailing={<Badge label={`+${pts(r.points)}`} tone="points" />}
+                divider
+              />
+            ))}
+            <Button label="Agregar rutina" variant="ghost" block onPress={add} />
+          </>
+        )}
       </QueryView>
     </Card>
   );

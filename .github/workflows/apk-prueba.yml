@@ -29,6 +29,10 @@ jobs:
     defaults:
       run:
         working-directory: app
+    env:
+      # Dirección de la API en Azure (no es secreta). Queda fija dentro del APK al compilar.
+      # La variable API_URL del repo, si existe, la reemplaza.
+      EXPO_PUBLIC_API_URL: ${{ vars.API_URL || 'https://purple-coast-025bebe10.8.azurestaticapps.net/api' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -69,15 +73,16 @@ jobs:
           if-no-files-found: error
 
       - name: Publicar en el link fijo
-        # Solo ramas de este repo: los PR desde forks no tienen permiso de escritura.
-        if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+        # Solo ramas de este repo (los PR desde forks no tienen permiso de escritura) y solo si el APK ya apunta
+        # a la API: un APK sin API_URL no sirve y reemplazaría al último que funciona.
+        if: env.EXPO_PUBLIC_API_URL != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository)
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           REF: ${{ github.head_ref || github.ref_name }}
         run: |
           cp android/app/build/outputs/apk/release/app-release.apk checkhome.apk
-          NOTES="APK de prueba con datos simulados. Último build: rama $REF, commit $SHA ($(date -u +'%Y-%m-%d %H:%M UTC')). Firmado con clave de depuración: solo para probar."
+          NOTES="APK de prueba conectado a la API de Azure. Último build: rama $REF, commit $SHA ($(date -u +'%Y-%m-%d %H:%M UTC')). Firmado con clave de depuración: solo para probar."
           if gh release view apk-prueba >/dev/null 2>&1; then
             gh release edit apk-prueba --notes "$NOTES"
           else

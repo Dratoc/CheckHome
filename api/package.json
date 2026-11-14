@@ -1,0 +1,24 @@
+{
+  "name": "checkhome-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "API de CheckHome: Node/Express sobre Azure SQL, servida por las Functions gratis de Static Web Apps (ver docs/adr/0003-api-en-static-web-apps.md)",
+  "type": "module",
+  "main": "src/functions/*.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch --env-file=.env src/server.js",
+    "migrate": "node scripts/migrate.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.17.1",
+    "bcryptjs": "^2.4.3",
+    "express": "^4.22.3",
+    "jsonwebtoken": "^9.0.3",
+    "mssql": "^11.0.2"
+  }
+}

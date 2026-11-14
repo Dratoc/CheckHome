@@ -107,7 +107,7 @@ export function HouseholdScreen({ navigation }: TabScreenProps<'Household'>) {
       <Button label="Ver sistema de diseño" variant="ghost" block onPress={() => navigation.navigate('DesignPreview')} />
       <Button label="Cerrar sesión" variant="ghost" block onPress={logout} />
       <Text variant="caption" color="textSubtle" align="center">
-        Sesión de {user.email} · datos simulados
+        Sesión de {user.email}
       </Text>
     </Screen>
   );

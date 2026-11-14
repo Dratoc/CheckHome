@@ -21,6 +21,10 @@ export type RootStackParamList = {
   // App
   Main: NavigatorScreenParams<TabParamList>;
   AddExpense: undefined;
+  AddObligation: undefined;
+  AddIncomeSource: undefined;
+  AddIncome: { sourceId: number; name: string; expectedAmount: number; isPrivate: boolean };
+  AddRoutine: undefined;
   DesignPreview: undefined;
 };
 

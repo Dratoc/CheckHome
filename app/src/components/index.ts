@@ -14,3 +14,4 @@ export * from './SectionHeader';
 export * from './SegmentedControl';
 export * from './StateView';
 export * from './IconCircle';
+export * from './ChoiceChips';

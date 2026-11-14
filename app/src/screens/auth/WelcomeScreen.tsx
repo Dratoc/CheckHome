@@ -24,8 +24,8 @@ export function WelcomeScreen({ navigation }: RootScreenProps<'Welcome'>) {
         <Button label="Ya tengo cuenta" variant="secondary" size="lg" block onPress={() => navigation.navigate('Login')} />
         <Card tone="tinted" padding="md">
           <Text variant="caption" color="textMuted">
-            Versión de prueba con datos simulados. Para ver un hogar con datos usa demo@checkhome.cl y la clave
-            checkhome.
+            Crea tu cuenta y tu hogar, o únete al de tu familia con el código de invitación. La primera vez que
+            abras la app en el día puede tardar unos segundos en conectar.
           </Text>
         </Card>
       </View>

@@ -11,6 +11,10 @@ import { CreateHouseholdScreen } from '../screens/household/CreateHouseholdScree
 import { JoinHouseholdScreen } from '../screens/household/JoinHouseholdScreen';
 import { AddExpenseScreen } from '../screens/AddExpenseScreen';
 import { DesignPreview } from '../screens/DesignPreview';
+import { AddIncomeScreen } from '../screens/forms/AddIncomeScreen';
+import { AddIncomeSourceScreen } from '../screens/forms/AddIncomeSourceScreen';
+import { AddObligationScreen } from '../screens/forms/AddObligationScreen';
+import { AddRoutineScreen } from '../screens/forms/AddRoutineScreen';
 import { MainTabs } from './MainTabs';
 import type { RootStackParamList } from './types';
 
@@ -24,7 +28,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
  */
 export function RootNavigator() {
   const t = useTheme();
-  const { user, household } = useSession();
+  const { restoring, user, household } = useSession();
 
   const navTheme = useMemo<NavTheme>(() => {
     const base = t.scheme === 'dark' ? DarkTheme : DefaultTheme;
@@ -41,6 +45,9 @@ export function RootNavigator() {
       },
     };
   }, [t]);
+
+  // Mientras se lee la sesión guardada no se muestra nada (es un instante).
+  if (restoring) return null;
 
   return (
     <NavigationContainer theme={navTheme}>
@@ -70,6 +77,10 @@ export function RootNavigator() {
           <Stack.Group>
             <Stack.Screen name="Main" component={MainTabs} options={{ headerShown: false }} />
             <Stack.Screen name="AddExpense" component={AddExpenseScreen} options={{ title: 'Nuevo gasto', presentation: 'modal' }} />
+            <Stack.Screen name="AddObligation" component={AddObligationScreen} options={{ title: 'Nueva cuenta', presentation: 'modal' }} />
+            <Stack.Screen name="AddIncomeSource" component={AddIncomeSourceScreen} options={{ title: 'Nueva fuente de ingreso', presentation: 'modal' }} />
+            <Stack.Screen name="AddIncome" component={AddIncomeScreen} options={{ title: 'Anotar ingreso', presentation: 'modal' }} />
+            <Stack.Screen name="AddRoutine" component={AddRoutineScreen} options={{ title: 'Nueva rutina', presentation: 'modal' }} />
             <Stack.Screen name="DesignPreview" component={DesignPreview} options={{ title: 'Sistema de diseño' }} />
           </Stack.Group>
         )}
