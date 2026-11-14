@@ -12,3 +12,5 @@ export * from './Amount';
 export * from './Fab';
 export * from './SectionHeader';
 export * from './SegmentedControl';
+export * from './StateView';
+export * from './IconCircle';

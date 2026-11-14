@@ -1,0 +1,86 @@
+# Genera un APK de prueba de CheckHome en un runner de GitHub.
+# Costo cero: el repo es público, y en repos públicos los runners estándar de GitHub Actions son gratis.
+# Corre en cada PR que toque app/ (así cada cambio trae su APK para probar) y también a mano
+# (pestaña Actions → "APK de prueba" → Run workflow).
+# El APK queda como artefacto del run por 14 días y además se publica en el pre-release "apk-prueba",
+# con un link fijo que siempre apunta al último build:
+#   https://github.com/Dratoc/CheckHome/releases/download/apk-prueba/checkhome.apk
+# Está firmado con la clave de depuración: sirve para instalar y probar, no para publicar en la Play Store.
+name: APK de prueba
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'app/**'
+      - '.github/workflows/apk-prueba.yml'
+
+permissions:
+  contents: write # para actualizar el pre-release "apk-prueba"
+
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Revisar tipos
+        run: npx tsc --noEmit
+
+      - name: Generar proyecto Android
+        run: npx expo prebuild --platform android --no-install
+        env:
+          CI: 1
+
+      - name: Compilar APK
+        working-directory: app/android
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+
+      - name: Subir APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkhome-${{ github.sha }}
+          path: app/android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Publicar en el link fijo
+        # Solo ramas de este repo: los PR desde forks no tienen permiso de escritura.
+        if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          REF: ${{ github.head_ref || github.ref_name }}
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk checkhome.apk
+          NOTES="APK de prueba con datos simulados. Último build: rama $REF, commit $SHA ($(date -u +'%Y-%m-%d %H:%M UTC')). Firmado con clave de depuración: solo para probar."
+          if gh release view apk-prueba >/dev/null 2>&1; then
+            gh release edit apk-prueba --notes "$NOTES"
+          else
+            gh release create apk-prueba --prerelease --title "APK de prueba" --target "$SHA" --notes "$NOTES"
+          fi
+          gh release upload apk-prueba checkhome.apk --clobber

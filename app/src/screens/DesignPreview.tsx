@@ -20,7 +20,7 @@ import { useTheme, type ColorSchemePreference } from '../theme';
 
 /**
  * Vitrina del sistema de diseño. Sirve para revisar tokens y componentes en claro y oscuro
- * mientras no existan las pantallas reales. Se reemplaza por la navegación en la Fase 0.
+ * Se abre desde Hogar → "Ver sistema de diseño".
  */
 export function DesignPreview() {
   const t = useTheme();
@@ -29,7 +29,7 @@ export function DesignPreview() {
   const done = Object.values(checks).filter(Boolean).length;
 
   return (
-    <Screen>
+    <Screen edges={['bottom']}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
         <View style={{ gap: t.spacing.xxs }}>
           <Text variant="overline" color="textMuted">
