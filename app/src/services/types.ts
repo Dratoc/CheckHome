@@ -113,6 +113,10 @@ export type Routine = {
   householdId: number;
   name: string;
   frequency: Frequency;
+  /** Solo diarias: días en que se repite, 1 = lunes … 7 = domingo */
+  days?: number[];
+  /** Si toca hoy (las semanales, toda la semana) */
+  dueToday: boolean;
   status: RoutineStatus;
   /** Puntos acordados (el voto más alto); no hay mientras está en votación */
   points?: number;

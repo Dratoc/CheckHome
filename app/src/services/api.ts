@@ -359,7 +359,8 @@ export function listRoutines(householdId: number): Promise<RoutineWithCheck[]> {
   return get(`/households/${householdId}/routines`);
 }
 
-export type RoutineInput = { name: string; frequency: Frequency };
+/** days: solo para diarias, 1 = lunes … 7 = domingo. */
+export type RoutineInput = { name: string; frequency: Frequency; days?: number[] };
 
 /** Nace en votación; los puntos que elige quien la crea son su voto. */
 export function createRoutine(householdId: number, input: RoutineInput & { points: number }): Promise<Routine> {

@@ -215,6 +215,19 @@ test('editar, borrar e historial de pagos', { skip: !cs && 'sin TEST_SQL_CONNECT
   const solo = (await call('POST', '/households', { name: 'Depto' }, c.token)).body;
   const own = (await call('POST', `/households/${solo.id}/routines`, { name: 'Basura', frequency: 'weekly', points: 3 }, c.token)).body;
   assert.deepEqual([own.status, own.points], ['active', 3]);
+  // Rutinas diarias solo algunos días de la semana (1 = lunes … 7 = domingo).
+  const todayIso = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date());
+  const wd = ((new Date(`${todayIso}T12:00:00Z`).getUTCDay() + 6) % 7) + 1;
+  const other = (wd % 7) + 1;
+  assert.equal((await call('POST', `/households/${solo.id}/routines`, { name: 'Regar', frequency: 'daily', days: [], points: 1 }, c.token)).status, 400);
+  assert.equal((await call('POST', `/households/${solo.id}/routines`, { name: 'Regar', frequency: 'daily', days: [8], points: 1 }, c.token)).status, 400);
+  const notToday = (await call('POST', `/households/${solo.id}/routines`, { name: 'Regar', frequency: 'daily', days: [other], points: 1 }, c.token)).body;
+  assert.deepEqual([notToday.days, notToday.dueToday], [[other], false]);
+  assert.equal((await call('POST', `/routines/${notToday.id}/toggle`, {}, c.token)).status, 409, 'no toca hoy');
+  const edited2 = (await call('PATCH', `/routines/${notToday.id}`, { name: 'Regar', frequency: 'daily', days: [other, wd] }, c.token)).body;
+  assert.deepEqual([edited2.days, edited2.dueToday], [[wd, other].sort(), true]);
+  assert.equal((await call('POST', `/routines/${notToday.id}/toggle`, {}, c.token)).status, 204);
+  assert.deepEqual(own.days, undefined, 'las semanales no tienen días');
   assert.equal((await call('DELETE', `/routines/${r.id}`, null, ta)).status, 204);
   assert.equal((await call('GET', `/households/${hid}/routines`, null, ta)).body.length, 0);
 

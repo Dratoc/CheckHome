@@ -23,6 +23,7 @@ import { useRoutineToggle } from '../../hooks/useRoutineToggle';
 import { ExpenseFab } from '../../navigation/ExpenseFab';
 import * as api from '../../services/api';
 import type { RoutineWithCheck } from '../../services/api';
+import { repeatLabel } from '../../utils/weekdays';
 import type { BacklogTaskView, Member } from '../../services/types';
 import { useHousehold } from '../../state/SessionProvider';
 import { useTheme } from '../../theme';
@@ -81,8 +82,8 @@ function Today() {
       }
     >
       {(all) => {
-        const rows = all.filter((r) => r.status === 'active');
-        const pending = all.length - rows.length;
+        const rows = all.filter((r) => r.status === 'active' && r.dueToday);
+        const pending = all.filter((r) => r.status === 'estimating').length;
         const groups = [
           { title: 'Hoy', items: rows.filter((r) => r.frequency === 'daily') },
           { title: 'Esta semana', items: rows.filter((r) => r.frequency === 'weekly') },
@@ -93,6 +94,11 @@ function Today() {
               <Text variant="caption" color="textMuted">
                 {pending === 1 ? 'Hay 1 rutina en votación' : `Hay ${pending} rutinas en votación`}: aparece aquí cuando la valoren todos (pestaña Rutinas).
               </Text>
+            )}
+            {groups.length === 0 && (
+              <Card>
+                <EmptyState title="Hoy no toca nada" message="Ninguna rutina habilitada se repite hoy." />
+              </Card>
             )}
             {groups.map((g) => {
               const done = g.items.filter(toggle.isChecked).length;
@@ -138,7 +144,7 @@ function Routines() {
     await query.reload();
   });
   const add = () => navigation.navigate('AddRoutine');
-  const every = (r: RoutineWithCheck) => (r.frequency === 'daily' ? 'Todos los días' : 'Una vez por semana');
+  const every = (r: RoutineWithCheck) => repeatLabel(r);
   return (
     <>
       <QueryView

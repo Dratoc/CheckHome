@@ -1166,6 +1166,23 @@ router.post(
 
 const periodStart = (frequency) => (frequency === 'daily' ? today() : weekStart(today()));
 
+/** Día de la semana de una fecha ISO: 1 = lunes … 7 = domingo. */
+const isoWeekday = (isoDate) => ((new Date(`${isoDate}T12:00:00Z`).getUTCDay() + 6) % 7) + 1;
+const ALL_DAYS = [1, 2, 3, 4, 5, 6, 7];
+const daysFromMask = (mask) => ALL_DAYS.filter((d) => mask & (1 << (d - 1)));
+
+/** Días en que se repite una rutina diaria (1 = lunes … 7 = domingo). Sin días, son todos. */
+function weekdaysMask(value) {
+  if (value == null) return 127;
+  if (!Array.isArray(value) || value.length === 0 || value.some((d) => !ALL_DAYS.includes(d))) {
+    throw badRequest('Elige al menos un día de la semana.');
+  }
+  return value.reduce((m, d) => m | (1 << (d - 1)), 0);
+}
+
+/** Una rutina diaria toca hoy si hoy es uno de sus días; una semanal, cualquier día de la semana. */
+const dueToday = (r) => r.frequency === 'weekly' || Boolean(r.weekdays & (1 << (isoWeekday(today()) - 1)));
+
 /** Vista de una rutina: mientras está en votación no tiene puntos y muestra cuántos faltan por votar. */
 function routineView(r, votes, members, userId) {
   const rv = votes.filter((v) => v.routine_id === r.id);
@@ -1175,6 +1192,8 @@ function routineView(r, votes, members, userId) {
     householdId: r.household_id,
     name: r.name,
     frequency: r.frequency,
+    days: r.frequency === 'daily' ? daysFromMask(r.weekdays) : undefined,
+    dueToday: dueToday(r),
     status: r.status,
     points: estimating ? undefined : r.points,
     doneBy: r.done_by ?? undefined,
@@ -1187,7 +1206,7 @@ function routineView(r, votes, members, userId) {
 async function routineViews(hid, userId, where = '', params = {}) {
   const p = { h: hid, d: date(today()), w: date(weekStart(today())), ...params };
   const rows = await query(
-    `SELECT r.id, r.household_id, r.name, r.frequency, r.points, r.status, c.user_id AS done_by
+    `SELECT r.id, r.household_id, r.name, r.frequency, r.weekdays, r.points, r.status, c.user_id AS done_by
        FROM dbo.routines r
        LEFT JOIN dbo.routine_checks c ON c.routine_id = r.id AND c.period_start = IIF(r.frequency = 'daily', @d, @w)
       WHERE r.household_id = @h ${where} ORDER BY r.frequency, r.id`,
@@ -1248,11 +1267,12 @@ router.post(
     await requireMember(hid, req.userId);
     const frequency = req.body.frequency === 'weekly' ? 'weekly' : 'daily';
     const name = str(req.body.name, 'el nombre', { max: 100 });
+    const weekdays = frequency === 'daily' ? weekdaysMask(req.body.days) : 127;
     const points = votePoints(req.body.points ?? 1);
     const id = await transaction(async (tx) => {
       const [row] = await query(
-        "INSERT INTO dbo.routines (household_id, name, frequency, points, status) OUTPUT INSERTED.id VALUES (@h, @n, @f, @p, 'estimating')",
-        { h: hid, n: name, f: frequency, p: points },
+        "INSERT INTO dbo.routines (household_id, name, frequency, weekdays, points, status) OUTPUT INSERTED.id VALUES (@h, @n, @f, @wd, @p, 'estimating')",
+        { h: hid, n: name, f: frequency, wd: weekdays, p: points },
         tx,
       );
       await voteRoutine(row.id, hid, req.userId, points, tx);
@@ -1279,10 +1299,11 @@ router.post(
   '/routines/:id/toggle',
   h(async (req, res) => {
     const rid = idParam(req);
-    const [r] = await query('SELECT household_id, frequency, status FROM dbo.routines WHERE id = @r', { r: rid });
+    const [r] = await query('SELECT household_id, frequency, weekdays, status FROM dbo.routines WHERE id = @r', { r: rid });
     if (!r) throw notFound('No encontramos esa rutina.');
     await requireMember(r.household_id, req.userId);
     if (r.status === 'estimating') throw conflict('Esta rutina todavía no la valoran todos.');
+    if (!dueToday(r)) throw conflict('Esta rutina no toca hoy.');
     const p = { r: rid, d: date(periodStart(r.frequency)), u: req.userId };
     const deleted = await query('DELETE FROM dbo.routine_checks OUTPUT DELETED.routine_id WHERE routine_id = @r AND period_start = @d', p);
     if (!deleted.length) {
@@ -1304,16 +1325,17 @@ async function routineOf(req) {
   return r;
 }
 
-/** Cambia el nombre o la frecuencia. Los puntos no se editan: salen de la votación de todos. */
+/** Cambia el nombre, la frecuencia o los días. Los puntos no se editan: salen de la votación de todos. */
 router.patch(
   '/routines/:id',
   h(async (req, res) => {
     const r = await routineOf(req);
     const frequency = req.body.frequency === 'weekly' ? 'weekly' : 'daily';
-    await query('UPDATE dbo.routines SET name = @n, frequency = @f WHERE id = @r', {
+    await query('UPDATE dbo.routines SET name = @n, frequency = @f, weekdays = @wd WHERE id = @r', {
       r: r.id,
       n: str(req.body.name, 'el nombre', { max: 100 }),
       f: frequency,
+      wd: frequency === 'daily' ? weekdaysMask(req.body.days) : 127,
     });
     const [view] = await routineViews(r.household_id, req.userId, 'AND r.id = @r', { r: r.id });
     res.json(view);

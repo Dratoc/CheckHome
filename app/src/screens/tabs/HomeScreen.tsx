@@ -34,7 +34,7 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
   const toggle = useRoutineToggle(user.id, routines.reload);
 
   const upcoming = (obligations.data ?? []).filter((o) => o.status !== 'ok').slice(0, 3);
-  const daily = (routines.data ?? []).filter((r) => r.frequency === 'daily' && r.status === 'active');
+  const daily = (routines.data ?? []).filter((r) => r.frequency === 'daily' && r.status === 'active' && r.dueToday);
   const done = daily.filter(toggle.isChecked).length;
 
   return (
