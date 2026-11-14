@@ -63,6 +63,10 @@ export type Expense = {
   amount: number;
   description: string;
   spentOn: string; // YYYY-MM-DD
+  /** Con qué se pagó (sin dato en gastos antiguos) */
+  paymentMethodId?: number;
+  /** Si es personal, de quién; sin dato = del hogar */
+  personalUserId?: number;
 };
 
 export type ObligationKind = 'subscription' | 'utility' | 'mortgage' | 'loan' | 'vehicle_doc' | 'other';
@@ -88,6 +92,8 @@ export type Obligation = {
   /** Dividendo: la propiedad que se paga */
   propertyId?: number;
   propertyName?: string;
+  /** Con qué se paga normalmente */
+  paymentMethodId?: number;
 };
 
 export type ObligationPayment = {
@@ -99,6 +105,7 @@ export type ObligationPayment = {
   amountClp: number;
   ufValue?: number;
   paidOn: string;
+  paymentMethodName?: string;
   /** Solo el último pago se puede deshacer */
   canUndo: boolean;
 };
@@ -196,4 +203,93 @@ export type PropertyView = Property & {
   rentSources: IncomeSource[];
   rentThisMonth: number;
   mortgagePaidThisMonth: number;
+};
+
+// ---------- Medios de pago y cierre del mes ----------
+
+export type PaymentMethodKind = 'credit' | 'debit' | 'cash';
+
+export type PaymentMethod = {
+  id: number;
+  householdId: number;
+  ownerUserId: number;
+  ownerName?: string;
+  kind: PaymentMethodKind;
+  name: string;
+  /** Solo crédito */
+  cutDay?: number;
+  dueDay?: number;
+  isArchived: boolean;
+};
+
+/** Estado de cuenta de una tarjeta según lo anotado en la app. */
+export type CardStatement = {
+  methodId: number;
+  name: string;
+  ownerUserId: number;
+  ownerName: string;
+  start: string;
+  end: string;
+  label: string;
+  dueOn: string;
+  isClosed: boolean;
+  /** Facturado según la app */
+  charged: number;
+  paid: number;
+  pending: number;
+};
+
+export type CardStatementDetail = CardStatement & {
+  prevEnd: string;
+  nextEnd: string;
+  charges: Movement[];
+  payments: { id: number; amount: number; paidOn: string; userId: number; paidBy: string }[];
+};
+
+export type FinanceSettings = {
+  /** Sin dato = mes calendario */
+  cycleCutDay?: number;
+  savingsGoal: number;
+  /** De dónde salen los %: fijados a mano, por sueldos o partes iguales */
+  shareSource: 'manual' | 'income' | 'equal';
+  members: { userId: number; name: string; sharePct?: number; share: number }[];
+};
+
+export type SavingsDeposit = { id: number; userId: number; depositedBy: string; amount: number; depositedOn: string; note: string };
+
+export type Savings = { goal: number; total: number; deposits: SavingsDeposit[] };
+
+export type ClosingMember = {
+  userId: number;
+  name: string;
+  sharePct: number;
+  expectedHousehold: number;
+  expectedSavings: number;
+  personal: number;
+  expected: number;
+  paidExpenses: number;
+  paidCard: number;
+  paidSavings: number;
+  paidTotal: number;
+  cardToPay: number;
+  savingsToDeposit: number;
+  /** Positivo: puso de más y recibe; negativo: debe transferir */
+  balance: number;
+};
+
+export type Transfer = { fromUserId: number; fromName: string; toUserId: number; toName: string; amount: number };
+
+export type MonthClosing = {
+  cycle: { start: string; end: string; label: string; cutDay?: number; hasEnded: boolean; isCurrent: boolean };
+  prevEnd: string;
+  nextEnd: string;
+  shareSource: FinanceSettings['shareSource'];
+  totals: { household: number; personal: number; byCredit: number; savingsGoal: number; savingsDeposited: number; savingsTotal: number };
+  pendingCard: number;
+  savingsShortfall: number;
+  isFinal: boolean;
+  members: ClosingMember[];
+  cards: CardStatement[];
+  transfers: Transfer[];
+  closed?: { closedAt: string; closedBy: string; transfers: Transfer[] };
 };

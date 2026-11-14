@@ -42,3 +42,12 @@ Patrimonio (migración `0003`): `/households/:id/vehicles` (cada vehículo con s
 `POST` para crear y `PATCH`/`DELETE` en `/vehicles/:id` y `/properties/:id`. Al borrar un vehículo o propiedad, sus
 cuentas e ingresos quedan sueltos, con su historial. Las obligaciones aceptan `vehicleId` (papeles del auto) y
 `propertyId` (dividendo), y las fuentes de ingreso, `propertyId` (arriendo).
+
+Medios de pago y cierre del mes (migración `0004`): `/households/:id/payment-methods` (crédito con `cutDay` y `dueDay`,
+débito o efectivo; cada uno con su dueño), `PATCH`/`DELETE` en `/payment-methods/:id` (si ya se usó, se archiva),
+`GET /payment-methods/:id/statement?end=` (facturado según la app, para cuadrar con el banco),
+`POST /payment-methods/:id/payments` (pagar la tarjeta: pago de deuda, no gasto) y `DELETE /card-payments/:id`.
+Los gastos aceptan `paymentMethodId` y `personalUserId` (vacío = del hogar); las obligaciones y su pago, `paymentMethodId`.
+`/households/:id/finance-settings` (corte del ciclo, meta de ahorro, % fijos o por sueldos), `/households/:id/savings`
+y `DELETE /savings-deposits/:id`, `GET /households/:id/closing?end=` (cierre del ciclo) y `POST /households/:id/closings`
+/ `DELETE /households/:id/closings/:end` para cerrar y reabrir. Las cuentas del cierre están en `src/closing.js`.
