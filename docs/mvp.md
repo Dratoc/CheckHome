@@ -23,12 +23,13 @@ vencimiento**, y **repartir las tareas de la casa de forma visible y justa**.
 Idea central: gastos fijos, dividendos, cuotas y papeles del auto son **obligaciones** (algo que vence y se paga)
 con su historial de **pagos**. Así los vencimientos y las métricas salen de un solo lugar.
 
-## Modelo de datos (15 tablas + caché de UF)
+## Modelo de datos (17 tablas + caché de UF)
 
 - **Núcleo:** `users`, `households`, `household_members` (N a N con rol), `categories`.
 - **Cuentas:** `income_sources`, `incomes`, `expenses`, `obligations` (kind: subscription, utility, mortgage,
   loan, vehicle_doc, other; currency CLP o UF), `obligation_payments` (pesos pagados y valor UF del día),
-  `vehicles`, `properties`.
+  `vehicles`, `properties`, `attachments` y `attachment_files` (documentos en foto o PDF, ver
+  [ADR 0004](adr/0004-documentos-en-azure-sql.md)).
 - **Tareas:** `routines` (con puntos), `routine_checks`, `backlog_tasks`, `task_votes`.
 - **Apoyo:** `uf_values`, valor diario de la UF cacheado (ver ADR 0002).
 
@@ -64,6 +65,7 @@ Después del MVP: métricas y gráficos, notificaciones de vencimiento, fotos de
 | 7 | Privacidad | Ingresos pueden ser privados; gastos siempre compartidos |
 | 8 | Fin de la prueba Azure (~13 dic 2026) | Se decide al terminar el período |
 | 9 | Medios de pago y cierre del mes | El mes del hogar sigue el corte de la tarjeta (del 20 al 19). Cada gasto guarda con qué se pagó y si es del hogar o personal. Pagar la tarjeta es pago de deuda, no gasto, y cuenta como aporte de quien paga; débito y efectivo son aporte de su dueño. El hogar y la meta de ahorro se reparten por el % de sueldo; lo personal, cada uno. El cierre dice quién transfiere a quién |
+| 10 | Documentos adjuntos | En la misma base Azure SQL, no en Blob Storage; 4 MB por archivo y 200 MB por hogar ([ADR 0004](adr/0004-documentos-en-azure-sql.md)) |
 
 Postergado: la validación del correo queda para después del MVP; mientras tanto, el acceso a cada hogar se controla con su código de invitación.
 Token de sesión: JWT firmado por la API, clave en la configuración de App Service, 30 días.

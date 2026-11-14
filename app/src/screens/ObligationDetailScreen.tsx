@@ -1,12 +1,15 @@
+import { useState } from 'react';
 import { View } from 'react-native';
 import { Amount, Badge, Button, Card, EmptyState, IconCircle, ListItem, ProgressBar, QueryView, Screen, SectionHeader, Text } from '../components';
 import { useMutation, useQuery } from '../hooks/useQuery';
 import type { RootScreenProps } from '../navigation/types';
 import * as api from '../services/api';
-import type { ObligationPayment, ObligationView } from '../services/types';
+import type { Attachment, ObligationPayment, ObligationView } from '../services/types';
+import { useHousehold } from '../state/SessionProvider';
 import { useTheme } from '../theme';
 import { confirmDanger } from '../utils/confirm';
 import { formatShortDate } from '../utils/dates';
+import { AttachmentRows, kindForObligation } from './assets/attachmentUi';
 import { obligationBadge, obligationIcon, obligationSubtitle } from './tabs/obligationUi';
 
 const formatUf = (n: number) => n.toLocaleString('es-CL', { maximumFractionDigits: 2 });
@@ -17,6 +20,15 @@ export function ObligationDetailScreen({ navigation, route }: RootScreenProps<'O
   const { obligationId } = route.params;
   const obligation = useQuery(() => api.getObligation(obligationId), [obligationId]);
   const payments = useQuery(() => api.listObligationPayments(obligationId), [obligationId]);
+  const { household } = useHousehold();
+  const files = useQuery(() => api.listAttachments(household.id).then((all) => all.filter((a) => a.obligationId === obligationId)), [household.id, obligationId]);
+  const open = useMutation(api.openAttachment);
+  const [opening, setOpening] = useState<number>();
+  const openFile = async (a: Attachment) => {
+    setOpening(a.id);
+    await open.run(a.id);
+    setOpening(undefined);
+  };
   const reloadAll = async () => {
     await Promise.all([obligation.reload(), payments.reload()]);
   };
@@ -39,11 +51,43 @@ export function ObligationDetailScreen({ navigation, route }: RootScreenProps<'O
       <QueryView query={obligation}>
         {(o) => <Summary o={o} paying={pay.pending} onPay={() => pay.run()} onEdit={() => navigation.navigate('AddObligation', { obligationId })} />}
       </QueryView>
-      {(pay.error || undo.error) && (
+      {(pay.error || undo.error || open.error) && (
         <Text color="danger" accessibilityRole="alert">
-          {pay.error ?? undo.error}
+          {pay.error ?? undo.error ?? open.error}
         </Text>
       )}
+
+      {obligation.data && (obligation.data.vehicleId || obligation.data.propertyId) ? (
+        <>
+          <SectionHeader title="Documento" />
+          <Card padding="md">
+            <QueryView
+              query={files}
+              isEmpty={(d) => d.length === 0}
+              empty={<EmptyState title="Sin copia digital" message="Adjunta el PDF oficial o una foto para tenerlo siempre a mano." />}
+            >
+              {(rows) => <AttachmentRows items={rows} onOpen={openFile} onEdit={(a) => navigation.navigate('AddAttachment', { attachment: a })} opening={opening} />}
+            </QueryView>
+            <View style={{ alignItems: 'flex-start' }}>
+              <Button
+                label={files.data?.length ? 'Adjuntar otro' : 'Adjuntar copia digital'}
+                size="sm"
+                variant="ghost"
+                onPress={() => {
+                  const o = obligation.data!;
+                  navigation.navigate('AddAttachment', {
+                    owner: o.vehicleId ? 'vehicle' : 'property',
+                    obligationId: o.id,
+                    kind: kindForObligation(o),
+                    title: o.name,
+                    expiresOn: o.nextDueOn,
+                  });
+                }}
+              />
+            </View>
+          </Card>
+        </>
+      ) : null}
 
       <SectionHeader title="Historial de pagos" />
       <Card padding="md">
