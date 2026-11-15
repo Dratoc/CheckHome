@@ -4,7 +4,7 @@ import { Amount, Badge, Button, Card, IconCircle, ListItem, ProgressBar, QueryVi
 import { useMutation, useQuery } from '../../hooks/useQuery';
 import type { RootScreenProps } from '../../navigation/types';
 import * as api from '../../services/api';
-import type { ClosingMember, MonthClosing, Transfer } from '../../services/types';
+import type { ClosingMember, MemberSpend, MonthClosing, Transfer } from '../../services/types';
 import { useHousehold } from '../../state/SessionProvider';
 import { useTheme } from '../../theme';
 import { confirmDanger } from '../../utils/confirm';
@@ -78,6 +78,16 @@ export function ClosingScreen({ navigation, route }: RootScreenProps<'Closing'>)
             {c.members.map((m) => (
               <MemberCard key={m.userId} m={m} />
             ))}
+
+            <SectionHeader title="Quién gastó con qué" />
+            <Card padding="md">
+              {c.spendByMember.map((m, i) => (
+                <SpendRows key={m.userId} m={m} last={i === c.spendByMember.length - 1} />
+              ))}
+              <Text variant="caption" color="textMuted">
+                Gastos y cuentas que anotó cada uno en este mes, según el medio con que se pagaron.
+              </Text>
+            </Card>
 
             {c.cards.length > 0 && (
               <>
@@ -181,6 +191,26 @@ function Settlement({ c, closing, reopening, onClose, onReopen }: { c: MonthClos
         </Text>
       )}
     </Card>
+  );
+}
+
+function SpendRows({ m, last }: { m: MemberSpend; last: boolean }) {
+  const t = useTheme();
+  return (
+    <View style={{ gap: t.spacing.xs, paddingBottom: last ? 0 : t.spacing.sm }}>
+      <Row label={first(m.name)} value={m.total} strong />
+      {m.methods.length === 0 ? (
+        <Text variant="caption" color="textMuted">
+          No anotó gastos este mes.
+        </Text>
+      ) : (
+        m.methods.map((x) => (
+          <View key={x.methodId ?? 0} style={{ paddingLeft: t.spacing.md }}>
+            <Row label={x.name} value={x.amount} muted={!x.kind} />
+          </View>
+        ))
+      )}
+    </View>
   );
 }
 

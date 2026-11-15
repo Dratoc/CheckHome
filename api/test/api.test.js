@@ -443,6 +443,16 @@ test('medios de pago, cuadratura de la tarjeta y cierre del mes', { skip: !cs &&
   assert.equal(c.totals.personal, 150000);
   assert.equal(c.pendingCard, 650000);
   assert.equal(c.isFinal, false);
+  // Quién gastó con qué: lo que anotó cada uno, por medio de pago.
+  const spendOf = (uid) => c.spendByMember.find((m) => m.userId === uid);
+  assert.equal(spendOf(a.user.id).total, 550000);
+  assert.deepEqual(spendOf(a.user.id).methods.map((x) => [x.name, x.amount]), [['Visa Hernán', 550000]]);
+  assert.deepEqual(spendOf(b.user.id).methods.map((x) => [x.name, x.amount]), [['Visa Hernán', 100000], ['Débito Cami', 50000]]);
+
+  // Sin ?end, la tarjeta abre en el período en curso; payableEnd apunta al último estado ya cerrado.
+  const now = (await call('GET', `/payment-methods/${credit.body.id}/statement`, null, ta)).body;
+  assert.equal(now.isClosed, false);
+  assert.ok(now.payableEnd <= now.end && now.payableEnd >= now.prevEnd, JSON.stringify(now));
 
   // El 5 Hernán paga la tarjeta (cuenta para el corte del 19 oct) y cada uno deposita su parte del ahorro.
   const pay = await call('POST', `/payment-methods/${credit.body.id}/payments`, { amount: 650000, paidOn: '2026-11-05' }, ta);
