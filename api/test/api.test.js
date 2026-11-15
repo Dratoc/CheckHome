@@ -120,6 +120,20 @@ test('flujo completo de dos personas en un hogar', { skip: !cs && 'sin TEST_SQL_
   assert.equal((await call('POST', `/routines/${r.body.id}/vote`, { points: 5 }, ta)).status, 409, 'ya no está en votación');
   assert.equal((await call('POST', `/routines/${r.body.id}/toggle`, {}, tb)).status, 204);
   assert.equal((await call('GET', `/households/${hid}/routines`, null, ta)).body[0].doneBy, b.body.user.id);
+  // Cada uno elige las rutinas que hará: una persona por período, y se puede soltar.
+  const rid = r.body.id;
+  assert.equal((await call('POST', `/routines/${rid}/claim`, {}, ta)).status, 204);
+  assert.equal((await call('POST', `/routines/${rid}/claim`, {}, ta)).status, 204, 'tomarla de nuevo no falla');
+  assert.equal((await call('POST', `/routines/${rid}/claim`, {}, tb)).status, 409, 'ya la tomó otra persona');
+  assert.equal((await call('GET', `/households/${hid}/routines`, null, tb)).body[0].claimedBy, a.body.user.id);
+  assert.equal((await call('DELETE', `/routines/${rid}/claim`, null, tb)).status, 204, 'soltar una ajena no hace nada');
+  assert.equal((await call('GET', `/households/${hid}/routines`, null, tb)).body[0].claimedBy, a.body.user.id);
+  assert.equal((await call('DELETE', `/routines/${rid}/claim`, null, ta)).status, 204);
+  assert.equal((await call('GET', `/households/${hid}/routines`, null, tb)).body[0].claimedBy, undefined);
+  assert.equal((await call('POST', `/routines/${rid}/claim`, {}, tb)).status, 204);
+  const pendingVote = (await call('POST', `/households/${hid}/routines`, { name: 'Baño', frequency: 'weekly', points: 3 }, ta)).body;
+  assert.equal((await call('POST', `/routines/${pendingVote.id}/claim`, {}, ta)).status, 409, 'no se toma mientras está en votación');
+  assert.equal((await call('DELETE', `/routines/${pendingVote.id}`, null, ta)).status, 204);
 
   assert.equal((await call('POST', `/households/${hid}/backlog`, { title: 'Pintar reja' }, ta)).status, 201);
   const [task] = (await call('GET', `/households/${hid}/backlog`, null, ta)).body;

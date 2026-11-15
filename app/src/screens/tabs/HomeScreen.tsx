@@ -3,6 +3,7 @@ import {
   Amount,
   Avatar,
   Badge,
+  Button,
   Card,
   Checkbox,
   EmptyState,
@@ -34,8 +35,11 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
   const toggle = useRoutineToggle(user.id, routines.reload);
 
   const upcoming = (obligations.data ?? []).filter((o) => o.status !== 'ok').slice(0, 3);
-  const daily = (routines.data ?? []).filter((r) => r.frequency === 'daily' && r.status === 'active' && r.dueToday);
-  const done = daily.filter(toggle.isChecked).length;
+  // Inicio muestra solo lo mío por hacer y el avance de la casa; la lista completa está en Tareas.
+  const due = (routines.data ?? []).filter((r) => r.status === 'active' && r.dueToday);
+  const done = due.filter(toggle.isChecked).length;
+  const mine = due.filter((r) => r.claimedBy === user.id && !toggle.isChecked(r));
+  const free = due.filter((r) => r.claimedBy === undefined && !toggle.isChecked(r)).length;
 
   return (
     <Screen edges={['top']} overlay={<ExpenseFab />}>
@@ -106,33 +110,43 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
         </QueryView>
       </Card>
 
-      <SectionHeader title="Hoy en la casa" action="Tareas" onAction={() => navigation.navigate('Tasks')} />
+      <SectionHeader title="Mis tareas de hoy" action="Tareas" onAction={() => navigation.navigate('Tasks')} />
       <Card tone="points">
         <QueryView
           query={routines}
-          isEmpty={() => daily.length === 0}
-          empty={<EmptyState title="Sin rutinas diarias" message="Crea rutinas en la pestaña Tareas para repartir la casa." />}
+          isEmpty={() => due.length === 0}
+          empty={<EmptyState title="Sin rutinas para hoy" message="Crea rutinas en la pestaña Tareas para repartir la casa." />}
         >
           {() => (
             <>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <Text variant="label" color="points">
-                  {done} de {daily.length} listas
+                  La casa lleva {done} de {due.length}
                 </Text>
                 <Text variant="label" color="points">
-                  {Math.round((done / daily.length) * 100)}%
+                  {Math.round((done / due.length) * 100)}%
                 </Text>
               </View>
-              <ProgressBar value={done / daily.length} tone="points" accessibilityLabel="Avance de las rutinas de hoy" />
-              {daily.map((r) => (
+              <ProgressBar value={done / due.length} tone="points" accessibilityLabel="Avance de la casa hoy" />
+              {mine.map((r) => (
                 <Checkbox
                   key={r.id}
                   label={r.name}
-                  hint={`+${r.points ?? 0} ${r.points === 1 ? 'pto' : 'pts'}`}
-                  checked={toggle.isChecked(r)}
+                  hint={`${r.frequency === 'daily' ? 'Hoy' : 'Esta semana'} · +${r.points ?? 0} ${r.points === 1 ? 'pto' : 'pts'}`}
+                  checked={false}
                   onChange={() => toggle.toggle(r)}
                 />
               ))}
+              {mine.length === 0 && (
+                <Text variant="caption" color="textMuted">
+                  {free > 0
+                    ? `No tienes tareas por hacer. ${free === 1 ? 'Queda 1 libre' : `Quedan ${free} libres`} en la casa.`
+                    : 'No tienes tareas por hacer.'}
+                </Text>
+              )}
+              {mine.length === 0 && free > 0 && (
+                <Button label="Elegir tareas" size="sm" variant="secondary" onPress={() => navigation.navigate('Tasks')} />
+              )}
               {toggle.error && <Text color="danger">{toggle.error}</Text>}
             </>
           )}

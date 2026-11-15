@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useNavigation } from '@react-navigation/native';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Pressable, View } from 'react-native';
 import {
   Avatar,
@@ -89,11 +89,25 @@ function useMembers() {
   return (id?: number) => (id === undefined ? undefined : byId.get(id)?.displayName.split(' ')[0]);
 }
 
+type Scope = 'mine' | 'house';
+
+/** Hoy: por defecto solo lo que falta. "Mías" es lo que elegí hacer; "De la casa", todo lo que toca hoy. */
 function Today() {
+  const t = useTheme();
   const { user, household } = useHousehold();
   const query = useQuery(() => api.listRoutines(household.id), [household.id]);
+  const backlog = useQuery(() => api.listBacklog(household.id, user.id), [household.id, user.id]);
   const toggle = useRoutineToggle(user.id, query.reload);
   const nameOf = useMembers();
+  const [chosen, setChosen] = useState<Scope>();
+  const [showDone, setShowDone] = useState(false);
+  const action = useMutation(async (fn: () => Promise<void>, reload: () => Promise<void>) => {
+    await fn();
+    await reload();
+  });
+  const claim = (r: RoutineWithCheck) => action.run(() => api.claimRoutine(r.id), query.reload);
+  const release = (r: RoutineWithCheck) => action.run(() => api.releaseRoutine(r.id), query.reload);
+  const finishTask = (task: BacklogTaskView) => action.run(() => api.completeTask(task.id, user.id), backlog.reload);
 
   return (
     <QueryView
@@ -106,55 +120,248 @@ function Today() {
       }
     >
       {(all) => {
-        const rows = all.filter((r) => r.status === 'active' && r.dueToday);
-        const pending = all.filter((r) => r.status === 'estimating').length;
-        const groups = [
-          { title: 'Hoy', items: rows.filter((r) => r.frequency === 'daily') },
-          { title: 'Esta semana', items: rows.filter((r) => r.frequency === 'weekly') },
-        ].filter((g) => g.items.length > 0);
+        const due = all.filter((r) => r.status === 'active' && r.dueToday);
+        const estimating = all.filter((r) => r.status === 'estimating').length;
+        const todo = due.filter((r) => !toggle.isChecked(r));
+        const done = due.filter(toggle.isChecked);
+        const mineTodo = todo.filter((r) => r.claimedBy === user.id);
+        const myTasks = (backlog.data ?? []).filter((task) => task.status === 'taken' && task.takenBy === user.id);
+        const mineDone = done.filter((r) => r.doneBy === user.id || (r.doneBy === undefined && r.claimedBy === user.id));
+        const mineCount = mineTodo.length + myTasks.length;
+        // Si no he elegido nada, parto viendo la casa para elegir; si ya tengo tareas, parto en las mías.
+        const scope: Scope = chosen ?? (mineCount + mineDone.length > 0 ? 'mine' : 'house');
+        // Al tocar algo, la vista queda fija: no salta de "De la casa" a "Mis tareas" al tomar la primera.
+        const hold = (fn: () => unknown) => () => {
+          setChosen(scope);
+          fn();
+        };
+        const pending = scope === 'mine' ? mineTodo : todo;
+        const finished = scope === 'mine' ? mineDone : done;
+        const total = pending.length + finished.length + (scope === 'mine' ? myTasks.length : 0);
+        const free = todo.filter((r) => r.claimedBy === undefined);
+        const taken = todo.filter((r) => r.claimedBy !== undefined);
+
+        const when = (r: RoutineWithCheck) => (r.frequency === 'daily' ? 'Hoy' : 'Esta semana');
+        const ownerBadge = (r: RoutineWithCheck) =>
+          r.claimedBy === user.id ? <Badge label="Tuya" tone="primary" /> : <Badge label={nameOf(r.claimedBy) ?? 'Tomada'} tone="neutral" />;
+
         return (
           <>
-            {pending > 0 && (
-              <Text variant="caption" color="textMuted">
-                {pending === 1 ? 'Hay 1 rutina en votación' : `Hay ${pending} rutinas en votación`}: aparece aquí cuando la valoren todos (pestaña Rutinas).
-              </Text>
+            <FilterPills<Scope>
+              value={scope}
+              onChange={(v) => {
+                setChosen(v);
+                setShowDone(false);
+              }}
+              options={[
+                { value: 'mine', label: 'Mis tareas', count: mineCount },
+                { value: 'house', label: 'De la casa', count: todo.length },
+              ]}
+            />
+
+            {total > 0 && (
+              <View style={{ gap: t.spacing.xs }}>
+                <Text variant="label" color="textMuted">
+                  {scope === 'mine'
+                    ? `Hiciste ${finished.length} de ${total}`
+                    : `La casa lleva ${finished.length} de ${total}`}
+                </Text>
+                <ProgressBar value={finished.length / total} tone="points" accessibilityLabel="Avance de hoy" />
+              </View>
             )}
-            {groups.length === 0 && (
+
+            {scope === 'mine' && mineCount === 0 && (
               <Card>
-                <EmptyState title="Hoy no toca nada" message="Ninguna rutina habilitada se repite hoy." />
+                <EmptyState
+                  title={finished.length > 0 ? '¡Listo por hoy!' : 'Aún no eliges tareas'}
+                  message={
+                    finished.length > 0
+                      ? 'Hiciste todo lo que elegiste. Si te animas, en la casa quedan tareas libres.'
+                      : 'Mira las tareas de la casa y toca "Me la llevo" en las que vas a hacer.'
+                  }
+                  action={free.length > 0 ? 'Ver tareas de la casa' : undefined}
+                  onAction={() => setChosen('house')}
+                />
               </Card>
             )}
-            {groups.map((g) => {
-              const done = g.items.filter(toggle.isChecked).length;
-              return (
-                <Card key={g.title} tone="points">
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                    <Text variant="heading">{g.title}</Text>
-                    <Text variant="label" color="points">
-                      {done} de {g.items.length}
-                    </Text>
-                  </View>
-                  <ProgressBar value={done / g.items.length} tone="points" accessibilityLabel={`Avance de ${g.title.toLowerCase()}`} />
-                  {g.items.map((r) => {
-                    const by = nameOf(r.doneBy);
-                    return (
-                      <Checkbox
-                        key={r.id}
-                        label={r.name}
-                        hint={toggle.isChecked(r) && by ? `Lo hizo ${by} · +${pts(r.points ?? 0)}` : `+${pts(r.points ?? 0)}`}
-                        checked={toggle.isChecked(r)}
-                        onChange={() => toggle.toggle(r)}
-                      />
-                    );
-                  })}
+
+            {scope === 'mine' && mineCount > 0 && (
+              <Card tone="points">
+                {mineTodo.map((r) => (
+                  <TaskRow
+                    key={`r${r.id}`}
+                    label={r.name}
+                    hint={`${when(r)} · +${pts(r.points ?? 0)}`}
+                    onDone={hold(() => toggle.toggle(r))}
+                    trailing={<Button label="Soltar" size="sm" variant="ghost" onPress={hold(() => release(r))} />}
+                  />
+                ))}
+                {myTasks.map((task) => (
+                  <TaskRow
+                    key={`t${task.id}`}
+                    label={task.title}
+                    hint={`Backlog · +${pts(task.points ?? 0)}`}
+                    onDone={hold(() => finishTask(task))}
+                  />
+                ))}
+              </Card>
+            )}
+
+            {scope === 'house' && todo.length === 0 && (
+              <Card>
+                <EmptyState
+                  title={done.length > 0 ? 'La casa está al día' : 'Hoy no toca nada'}
+                  message={done.length > 0 ? 'Ya se hizo todo lo de hoy.' : 'Ninguna rutina habilitada se repite hoy.'}
+                />
+              </Card>
+            )}
+
+            {scope === 'house' && free.length > 0 && (
+              <>
+                <SectionHeader title={`Libres (${free.length})`} />
+                <Card tone="points">
+                  {free.map((r) => (
+                    <TaskRow
+                      key={r.id}
+                      label={r.name}
+                      hint={`${when(r)} · +${pts(r.points ?? 0)}`}
+                      onDone={hold(() => toggle.toggle(r))}
+                      trailing={<Button label="Me la llevo" size="sm" variant="secondary" onPress={hold(() => claim(r))} />}
+                    />
+                  ))}
                 </Card>
-              );
-            })}
+              </>
+            )}
+
+            {scope === 'house' && taken.length > 0 && (
+              <>
+                <SectionHeader title={`Ya tienen dueño (${taken.length})`} />
+                <Card>
+                  {taken.map((r) => (
+                    <TaskRow key={r.id} label={r.name} hint={`${when(r)} · +${pts(r.points ?? 0)}`} onDone={hold(() => toggle.toggle(r))} trailing={ownerBadge(r)} />
+                  ))}
+                </Card>
+              </>
+            )}
+
+            {scope === 'house' && estimating > 0 && (
+              <Text variant="caption" color="textMuted">
+                {estimating === 1 ? 'Hay 1 rutina en votación' : `Hay ${estimating} rutinas en votación`}: aparece aquí cuando la valoren todos (pestaña Rutinas).
+              </Text>
+            )}
+
+            {finished.length > 0 && (
+              <DoneSection count={finished.length} open={showDone} onToggle={() => setShowDone((v) => !v)} title="Hechas">
+                {finished.map((r) => {
+                  const by = nameOf(r.doneBy);
+                  return (
+                    <Checkbox
+                      key={r.id}
+                      label={r.name}
+                      hint={`${by && r.doneBy !== user.id ? `Lo hizo ${by}` : 'La hiciste tú'} · +${pts(r.points ?? 0)} · Toca para deshacer`}
+                      checked
+                      onChange={hold(() => toggle.toggle(r))}
+                    />
+                  );
+                })}
+              </DoneSection>
+            )}
+
             {toggle.error && <Text color="danger">{toggle.error}</Text>}
+            {action.error && <Text color="danger">{action.error}</Text>}
           </>
         );
       }}
     </QueryView>
+  );
+}
+
+/** Fila por hacer: la casilla la marca hecha (y sale de la lista); a la derecha, una acción o quién la tiene. */
+function TaskRow({ label, hint, onDone, trailing }: { label: string; hint: string; onDone: () => void; trailing?: ReactNode }) {
+  const t = useTheme();
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.sm }}>
+      <View style={{ flex: 1 }}>
+        <Checkbox label={label} hint={hint} checked={false} onChange={onDone} />
+      </View>
+      {trailing}
+    </View>
+  );
+}
+
+/** Filtro de dos o tres opciones en forma de píldoras, con un contador al lado. */
+function FilterPills<T extends string>({
+  value,
+  onChange,
+  options,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: { value: T; label: string; count?: number }[];
+}) {
+  const t = useTheme();
+  return (
+    <View style={{ flexDirection: 'row', gap: t.spacing.sm }} accessibilityRole="radiogroup">
+      {options.map((o) => {
+        const selected = o.value === value;
+        return (
+          <Pressable
+            key={o.value}
+            onPress={() => onChange(o.value)}
+            accessibilityRole="radio"
+            accessibilityState={{ selected }}
+            accessibilityLabel={o.count === undefined ? o.label : `${o.label}, ${o.count} por hacer`}
+            style={({ pressed }) => ({
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: t.spacing.xs,
+              minHeight: t.sizes.touchMin,
+              paddingHorizontal: t.spacing.md,
+              borderRadius: t.radii.pill,
+              backgroundColor: selected ? t.colors.primary : t.colors.surfaceAlt,
+              opacity: pressed ? 0.8 : 1,
+            })}
+          >
+            <Text variant="label" color={selected ? 'onPrimary' : 'text'}>
+              {o.label}
+            </Text>
+            {o.count !== undefined && (
+              <Text variant="label" color={selected ? 'onPrimary' : 'textMuted'}>
+                {o.count}
+              </Text>
+            )}
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/** Sección plegable para lo ya hecho: cerrada por defecto, para que la lista muestre solo lo que falta. */
+function DoneSection({ title, count, open, onToggle, children }: { title: string; count: number; open: boolean; onToggle: () => void; children: ReactNode }) {
+  const t = useTheme();
+  return (
+    <>
+      <Pressable
+        onPress={onToggle}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`${open ? 'Ocultar' : 'Ver'} ${title.toLowerCase()} (${count})`}
+        style={({ pressed }) => ({
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: t.spacing.xs,
+          minHeight: t.sizes.touchMin,
+          opacity: pressed ? 0.6 : 1,
+        })}
+      >
+        <Ionicons name={open ? 'chevron-down' : 'chevron-forward'} size={18} color={t.colors.textMuted} />
+        <Text variant="label" color="textMuted">
+          {title} ({count})
+        </Text>
+      </Pressable>
+      {open && <Card>{children}</Card>}
+    </>
   );
 }
 
@@ -250,6 +457,7 @@ function Backlog() {
     await query.reload();
   });
   const [title, setTitle] = useState('');
+  const [showDone, setShowDone] = useState(false);
 
   const add = async () => {
     if (title.trim().length < 3) return;
@@ -271,52 +479,70 @@ function Backlog() {
         isEmpty={(d) => d.length === 0}
         empty={<EmptyState title="Backlog vacío" message="Anota tareas únicas: arreglos, limpiezas grandes, trámites." />}
       >
-        {(rows) =>
-          [...rows]
-            .sort((a, b) => order[a.status] - order[b.status])
-            .map((task) => (
-              <Card key={task.id} padding="md">
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.sm }}>
-                  <Text variant="bodyStrong" style={{ flex: 1 }}>
-                    {task.title}
+        {(rows) => {
+          const active = [...rows].filter((task) => task.status !== 'done').sort((a, b) => order[a.status] - order[b.status]);
+          const done = rows.filter((task) => task.status === 'done');
+          const renderTask = (task: BacklogTaskView) => (
+            <Card key={task.id} padding="md">
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.sm }}>
+                <Text variant="bodyStrong" style={{ flex: 1 }}>
+                  {task.title}
+                </Text>
+                {task.points !== undefined && <Badge label={pts(task.points)} tone="points" />}
+                <Pressable
+                  onPress={() => navigation.navigate('EditTask', { taskId: task.id, title: task.title })}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Editar ${task.title}`}
+                  hitSlop={8}
+                  style={({ pressed }) => ({ padding: t.spacing.xs, opacity: pressed ? 0.6 : 1 })}
+                >
+                  <Ionicons name="create-outline" size={20} color={t.colors.textMuted} />
+                </Pressable>
+              </View>
+              {task.status === 'estimating' && (
+                <>
+                  <Text variant="caption" color="textMuted">
+                    {task.myVote ? `Votaste ${task.myVote}. ` : '¿Cuánto esfuerzo es? '}
+                    {task.votes.length} {task.votes.length === 1 ? 'voto' : 'votos'}; gana el más alto.
                   </Text>
-                  {task.points !== undefined && <Badge label={pts(task.points)} tone="points" />}
-                  <Pressable
-                    onPress={() => navigation.navigate('EditTask', { taskId: task.id, title: task.title })}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Editar ${task.title}`}
-                    hitSlop={8}
-                    style={({ pressed }) => ({ padding: t.spacing.xs, opacity: pressed ? 0.6 : 1 })}
-                  >
-                    <Ionicons name="create-outline" size={20} color={t.colors.textMuted} />
-                  </Pressable>
-                </View>
-                {task.status === 'estimating' && (
-                  <>
-                    <Text variant="caption" color="textMuted">
-                      {task.myVote ? `Votaste ${task.myVote}. ` : '¿Cuánto esfuerzo es? '}
-                      {task.votes.length} {task.votes.length === 1 ? 'voto' : 'votos'}; gana el más alto.
-                    </Text>
-                    <View style={{ flexDirection: 'row', gap: t.spacing.sm, flexWrap: 'wrap' }}>
-                      {api.FIBONACCI.map((n) => (
-                        <VoteChip key={n} value={n} selected={task.myVote === n} onPress={() => action.run(() => api.voteTask(task.id, user.id, n))} />
-                      ))}
-                    </View>
-                  </>
-                )}
-                {task.status === 'open' && (
-                  <Button label="Me la llevo" size="sm" onPress={() => action.run(() => api.takeTask(task.id, user.id))} />
-                )}
-                {task.status === 'taken' &&
-                  (task.takenBy === user.id ? (
-                    <Button label="Terminé" size="sm" onPress={() => action.run(() => api.completeTask(task.id, user.id))} />
-                  ) : (
-                    <Badge label={`La tomó ${nameOf(task.takenBy) ?? 'alguien'}`} tone="neutral" />
+                  <View style={{ flexDirection: 'row', gap: t.spacing.sm, flexWrap: 'wrap' }}>
+                    {api.FIBONACCI.map((n) => (
+                      <VoteChip key={n} value={n} selected={task.myVote === n} onPress={() => action.run(() => api.voteTask(task.id, user.id, n))} />
+                    ))}
+                  </View>
+                </>
+              )}
+              {task.status === 'open' && (
+                <Button label="Me la llevo" size="sm" onPress={() => action.run(() => api.takeTask(task.id, user.id))} />
+              )}
+              {task.status === 'taken' &&
+                (task.takenBy === user.id ? (
+                  <Button label="Terminé" size="sm" onPress={() => action.run(() => api.completeTask(task.id, user.id))} />
+                ) : (
+                  <Badge label={`La tomó ${nameOf(task.takenBy) ?? 'alguien'}`} tone="neutral" />
+                ))}
+            </Card>
+          );
+          return (
+            <>
+              {active.length === 0 && <EmptyState title="Nada pendiente" message="Todas las tareas del backlog están terminadas." />}
+              {active.map(renderTask)}
+              {done.length > 0 && (
+                <DoneSection title="Terminadas" count={done.length} open={showDone} onToggle={() => setShowDone((v) => !v)}>
+                  {done.map((task) => (
+                    <ListItem
+                      key={task.id}
+                      title={task.title}
+                      subtitle={`La hizo ${nameOf(task.takenBy) ?? 'alguien'}${task.points !== undefined ? ` · ${pts(task.points)}` : ''}`}
+                      onPress={() => navigation.navigate('EditTask', { taskId: task.id, title: task.title })}
+                      divider
+                    />
                   ))}
-                {task.status === 'done' && <Badge label={`Lista · ${nameOf(task.takenBy) ?? ''}`} tone="success" dot />}
-              </Card>
-            ))
-        }
+                </DoneSection>
+              )}
+            </>
+          );
+        }}
       </QueryView>
     </>
   );

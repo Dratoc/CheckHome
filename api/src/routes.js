@@ -1232,6 +1232,7 @@ function routineView(r, votes, members, userId) {
     status: r.status,
     points: estimating ? undefined : r.points,
     doneBy: r.done_by ?? undefined,
+    claimedBy: r.claimed_by ?? undefined,
     votes: rv.length,
     myVote: rv.find((v) => v.user_id === userId)?.points,
     pendingVoters: estimating ? Math.max(0, members - rv.length) : 0,
@@ -1241,9 +1242,11 @@ function routineView(r, votes, members, userId) {
 async function routineViews(hid, userId, where = '', params = {}) {
   const p = { h: hid, d: date(today()), w: date(weekStart(today())), ...params };
   const rows = await query(
-    `SELECT r.id, r.household_id, r.name, r.frequency, r.weekdays, r.points, r.status, c.user_id AS done_by
+    `SELECT r.id, r.household_id, r.name, r.frequency, r.weekdays, r.points, r.status, c.user_id AS done_by,
+            k.user_id AS claimed_by
        FROM dbo.routines r
        LEFT JOIN dbo.routine_checks c ON c.routine_id = r.id AND c.period_start = IIF(r.frequency = 'daily', @d, @w)
+       LEFT JOIN dbo.routine_claims k ON k.routine_id = r.id AND k.period_start = IIF(r.frequency = 'daily', @d, @w)
       WHERE r.household_id = @h ${where} ORDER BY r.frequency, r.id`,
     p,
   );
@@ -1352,6 +1355,42 @@ router.post(
   }),
 );
 
+/**
+ * "Me la llevo": la persona elige una rutina para hacerla hoy (o esta semana, si es semanal). No la marca como hecha;
+ * solo la deja en su lista. La toma una persona por período: si ya la tomó otra, responde 409.
+ */
+router.post(
+  '/routines/:id/claim',
+  h(async (req, res) => {
+    const r = await routineOf(req);
+    if (r.status === 'estimating') throw conflict('Esta rutina todavía no la valoran todos.');
+    if (!dueToday(r)) throw conflict('Esta rutina no toca hoy.');
+    const p = { r: r.id, d: date(periodStart(r.frequency)), u: req.userId };
+    try {
+      await query('INSERT INTO dbo.routine_claims (routine_id, period_start, user_id) VALUES (@r, @d, @u)', p);
+    } catch (e) {
+      if (e.number !== 2627) throw e;
+      const [owner] = await query('SELECT user_id FROM dbo.routine_claims WHERE routine_id = @r AND period_start = @d', p);
+      if (owner?.user_id !== req.userId) throw conflict('Otra persona ya tomó esta rutina.');
+    }
+    res.status(204).end();
+  }),
+);
+
+/** Suelta una rutina que la persona había tomado: vuelve a quedar libre para cualquiera. */
+router.delete(
+  '/routines/:id/claim',
+  h(async (req, res) => {
+    const r = await routineOf(req);
+    await query('DELETE FROM dbo.routine_claims WHERE routine_id = @r AND period_start = @d AND user_id = @u', {
+      r: r.id,
+      d: date(periodStart(r.frequency)),
+      u: req.userId,
+    });
+    res.status(204).end();
+  }),
+);
+
 async function routineOf(req) {
   const rid = idParam(req);
   const [r] = await query('SELECT * FROM dbo.routines WHERE id = @r', { r: rid });
@@ -1384,6 +1423,7 @@ router.delete(
     const r = await routineOf(req);
     await transaction(async (tx) => {
       await query('DELETE FROM dbo.routine_checks WHERE routine_id = @r', { r: r.id }, tx);
+      await query('DELETE FROM dbo.routine_claims WHERE routine_id = @r', { r: r.id }, tx);
       await query('DELETE FROM dbo.routine_votes WHERE routine_id = @r', { r: r.id }, tx);
       await query('DELETE FROM dbo.routines WHERE id = @r', { r: r.id }, tx);
     });
