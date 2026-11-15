@@ -446,7 +446,8 @@ export async function openAttachment(attachmentId: number): Promise<true> {
 
 // ---------- Tareas ----------
 
-export type RoutineWithCheck = Routine & { doneBy?: number };
+/** doneBy: quién la marcó hecha en este período; claimedBy: quién la eligió para hacerla. */
+export type RoutineWithCheck = Routine & { doneBy?: number; claimedBy?: number };
 
 export function listRoutines(householdId: number): Promise<RoutineWithCheck[]> {
   return get(`/households/${householdId}/routines`);
@@ -476,6 +477,16 @@ export function deleteRoutine(routineId: number) {
 
 export function toggleRoutine(routineId: number, _userId?: number): Promise<void> {
   return post(`/routines/${routineId}/toggle`);
+}
+
+/** "Me la llevo": la deja en mi lista de hoy (o de esta semana) sin marcarla como hecha. */
+export function claimRoutine(routineId: number): Promise<void> {
+  return post(`/routines/${routineId}/claim`);
+}
+
+/** Suelta una rutina que había tomado: vuelve a quedar libre para la casa. */
+export function releaseRoutine(routineId: number): Promise<void> {
+  return del(`/routines/${routineId}/claim`).then(() => undefined);
 }
 
 export function listBacklog(householdId: number, _userId?: number): Promise<BacklogTaskView[]> {
