@@ -9,6 +9,7 @@ import {
   Card,
   Checkbox,
   EmptyState,
+  IconCircle,
   ListItem,
   ProgressBar,
   QueryView,
@@ -40,6 +41,7 @@ export function TasksScreen() {
       <Text variant="title" accessibilityRole="header">
         Tareas
       </Text>
+      <ShoppingShortcut />
       <SegmentedControl<Section>
         value={section}
         onChange={setSection}
@@ -55,6 +57,28 @@ export function TasksScreen() {
       {section === 'backlog' && <Backlog />}
       {section === 'ranking' && <Ranking />}
     </Screen>
+  );
+}
+
+/** Botón a la lista de compras compartida, con cuántas cosas faltan. */
+function ShoppingShortcut() {
+  const t = useTheme();
+  const navigation = useNavigation();
+  const { household } = useHousehold();
+  const query = useQuery(() => api.listShopping(household.id), [household.id]);
+  const pending = query.data?.filter((i) => !i.boughtAt).length;
+  const subtitle =
+    pending === undefined ? 'Lo que hay que comprar para la casa' : pending === 0 ? 'No falta nada por ahora' : pending === 1 ? 'Falta 1 cosa' : `Faltan ${pending} cosas`;
+  return (
+    <Card padding="md">
+      <ListItem
+        title="Lista de compras"
+        subtitle={subtitle}
+        leading={<IconCircle name="cart-outline" tone="primary" />}
+        trailing={<Ionicons name="chevron-forward" size={20} color={t.colors.textMuted} />}
+        onPress={() => navigation.navigate('Shopping')}
+      />
+    </Card>
   );
 }
 

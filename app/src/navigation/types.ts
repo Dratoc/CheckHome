@@ -33,6 +33,7 @@ export type RootStackParamList = {
   /** Con routine, edita esa rutina */
   AddRoutine: { routine?: Routine } | undefined;
   EditTask: { taskId: number; title: string };
+  Shopping: undefined;
   // Patrimonio y deudas
   Vehicles: undefined;
   /** Con vehicle, lo edita */

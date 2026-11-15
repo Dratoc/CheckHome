@@ -137,6 +137,25 @@ test('flujo completo de dos personas en un hogar', { skip: !cs && 'sin TEST_SQL_
   const rank = (await call('GET', `/households/${hid}/ranking`, null, ta)).body;
   assert.equal(rank[0].user.username, `beto${sfx}`);
   assert.equal(rank[0].points, 10);
+
+  // Lista de compras compartida.
+  assert.equal((await call('POST', `/households/${hid}/shopping`, { name: 'Leche', quantity: '2 cajas' }, ta)).status, 201);
+  assert.equal((await call('POST', `/households/${hid}/shopping`, { name: '  ' }, ta)).status, 400);
+  assert.equal((await call('POST', `/households/${hid}/shopping`, { name: 'Pan' }, tb)).status, 201);
+  let shop = (await call('GET', `/households/${hid}/shopping`, null, tb)).body;
+  assert.deepEqual(shop.map((i) => i.name), ['Pan', 'Leche']);
+  const milk = shop.find((i) => i.name === 'Leche');
+  assert.equal(milk.quantity, '2 cajas');
+  assert.equal((await call('POST', `/shopping/${milk.id}/toggle`, {}, tb)).status, 204);
+  shop = (await call('GET', `/households/${hid}/shopping`, null, ta)).body;
+  assert.deepEqual(shop.map((i) => i.name), ['Pan', 'Leche'], 'lo comprado va al final');
+  assert.equal(shop[1].boughtBy, b.body.user.id);
+  assert.ok(shop[1].boughtAt);
+  assert.equal((await call('DELETE', `/households/${hid}/shopping/bought`, null, ta)).status, 204);
+  shop = (await call('GET', `/households/${hid}/shopping`, null, ta)).body;
+  assert.deepEqual(shop.map((i) => i.name), ['Pan']);
+  assert.equal((await call('DELETE', `/shopping/${shop[0].id}`, null, ta)).status, 204);
+  assert.equal((await call('GET', `/households/${hid}/shopping`, null, ta)).body.length, 0);
 });
 
 test('editar, borrar e historial de pagos', { skip: !cs && 'sin TEST_SQL_CONNECTION_STRING' }, async () => {

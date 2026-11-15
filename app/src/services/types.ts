@@ -343,3 +343,13 @@ export type MonthClosing = {
   transfers: Transfer[];
   closed?: { closedAt: string; closedBy: string; transfers: Transfer[] };
 };
+
+/** Algo de la lista de compras del hogar. Sin boughtAt, sigue pendiente. */
+export type ShoppingItem = {
+  id: number;
+  name: string;
+  quantity?: string;
+  addedBy: number;
+  boughtBy?: number;
+  boughtAt?: string;
+};

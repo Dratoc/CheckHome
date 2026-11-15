@@ -1517,6 +1517,90 @@ router.delete(
   }),
 );
 
+// ---------- Lista de compras ----------
+
+const shoppingRow = (r) => ({
+  id: r.id,
+  name: r.name,
+  quantity: r.quantity ?? undefined,
+  addedBy: r.added_by,
+  boughtBy: r.bought_by ?? undefined,
+  boughtAt: r.bought_at ? r.bought_at.toISOString() : undefined,
+});
+
+/** Lo pendiente primero (lo último agregado arriba); después lo comprado, lo más reciente arriba. */
+router.get(
+  '/households/:id/shopping',
+  h(async (req, res) => {
+    const hid = idParam(req);
+    await requireMember(hid, req.userId);
+    const rows = await query(
+      `SELECT * FROM dbo.shopping_items WHERE household_id = @h
+        ORDER BY CASE WHEN bought_at IS NULL THEN 0 ELSE 1 END, bought_at DESC, id DESC`,
+      { h: hid },
+    );
+    res.json(rows.map(shoppingRow));
+  }),
+);
+
+router.post(
+  '/households/:id/shopping',
+  h(async (req, res) => {
+    const hid = idParam(req);
+    await requireMember(hid, req.userId);
+    const quantity = typeof req.body.quantity === 'string' && req.body.quantity.trim() ? str(req.body.quantity, 'la cantidad', { max: 40 }) : null;
+    await query('INSERT INTO dbo.shopping_items (household_id, name, quantity, added_by) VALUES (@h, @n, @q, @u)', {
+      h: hid,
+      n: str(req.body.name, 'qué comprar', { max: 100 }),
+      q: quantity,
+      u: req.userId,
+    });
+    res.status(201).end();
+  }),
+);
+
+async function shoppingItem(req) {
+  const id = idParam(req);
+  const [item] = await query('SELECT * FROM dbo.shopping_items WHERE id = @i', { i: id });
+  if (!item) throw notFound('No encontramos esa cosa en la lista.');
+  await requireMember(item.household_id, req.userId);
+  return item;
+}
+
+/** Marca como comprado (o lo vuelve a dejar pendiente). */
+router.post(
+  '/shopping/:id/toggle',
+  h(async (req, res) => {
+    const item = await shoppingItem(req);
+    if (item.bought_at) {
+      await query('UPDATE dbo.shopping_items SET bought_by = NULL, bought_at = NULL WHERE id = @i', { i: item.id });
+    } else {
+      await query('UPDATE dbo.shopping_items SET bought_by = @u, bought_at = SYSUTCDATETIME() WHERE id = @i', { i: item.id, u: req.userId });
+    }
+    res.status(204).end();
+  }),
+);
+
+router.delete(
+  '/shopping/:id',
+  h(async (req, res) => {
+    const item = await shoppingItem(req);
+    await query('DELETE FROM dbo.shopping_items WHERE id = @i', { i: item.id });
+    res.status(204).end();
+  }),
+);
+
+/** Saca de la lista todo lo que ya se compró. */
+router.delete(
+  '/households/:id/shopping/bought',
+  h(async (req, res) => {
+    const hid = idParam(req);
+    await requireMember(hid, req.userId);
+    await query('DELETE FROM dbo.shopping_items WHERE household_id = @h AND bought_at IS NOT NULL', { h: hid });
+    res.status(204).end();
+  }),
+);
+
 /** Puntos de la semana: rutinas marcadas + tareas del backlog terminadas. */
 router.get(
   '/households/:id/ranking',
