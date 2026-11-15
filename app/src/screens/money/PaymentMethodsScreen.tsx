@@ -32,10 +32,10 @@ export function PaymentMethodsScreen({ navigation }: RootScreenProps<'PaymentMet
                 <ListItem
                   key={m.id}
                   title={m.name}
-                  subtitle={m.kind === 'credit' ? `${methodSubtitle(m)} · Ver estado de cuenta` : methodSubtitle(m)}
+                  subtitle={`${methodSubtitle(m)} · ${m.kind === 'credit' ? 'Ver estado de cuenta' : 'Ver gastos'}`}
                   leading={<IconCircle name={methodIcon[m.kind]} tone={m.kind === 'credit' ? 'primary' : 'neutral'} />}
                   onPress={() =>
-                    m.kind === 'credit' ? navigation.navigate('CardStatement', { methodId: m.id, name: m.name }) : navigation.navigate('AddPaymentMethod', { method: m })
+                    m.kind === 'credit' ? navigation.navigate('CardStatement', { methodId: m.id, name: m.name }) : navigation.navigate('MethodMovements', { methodId: m.id, name: m.name })
                   }
                   divider={i < rows.length - 1}
                 />

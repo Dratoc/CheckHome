@@ -449,6 +449,12 @@ test('medios de pago, cuadratura de la tarjeta y cierre del mes', { skip: !cs &&
   assert.deepEqual(spendOf(a.user.id).methods.map((x) => [x.name, x.amount]), [['Visa Hernán', 550000]]);
   assert.deepEqual(spendOf(b.user.id).methods.map((x) => [x.name, x.amount]), [['Visa Hernán', 100000], ['Débito Cami', 50000]]);
 
+  // El débito también muestra sus gastos, por mes del hogar.
+  const mv = (await call('GET', `/payment-methods/${debitB.id}/movements?end=2026-10-01`, null, ta)).body;
+  assert.equal(mv.start, '2026-09-20');
+  assert.equal(mv.total, 50000);
+  assert.equal(mv.charges.length, 1);
+
   // Sin ?end, la tarjeta abre en el período en curso; payableEnd apunta al último estado ya cerrado.
   const now = (await call('GET', `/payment-methods/${credit.body.id}/statement`, null, ta)).body;
   assert.equal(now.isClosed, false);

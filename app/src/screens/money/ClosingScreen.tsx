@@ -7,6 +7,7 @@ import * as api from '../../services/api';
 import type { ClosingMember, MemberSpend, MonthClosing, Transfer } from '../../services/types';
 import { useHousehold } from '../../state/SessionProvider';
 import { useTheme } from '../../theme';
+import { SpendChart } from './SpendChart';
 import { confirmDanger } from '../../utils/confirm';
 import { formatShortDate } from '../../utils/dates';
 
@@ -78,6 +79,11 @@ export function ClosingScreen({ navigation, route }: RootScreenProps<'Closing'>)
             {c.members.map((m) => (
               <MemberCard key={m.userId} m={m} />
             ))}
+
+            <SectionHeader title="Gráfico de gastos" />
+            <Card padding="md">
+              <SpendChart rows={c.spendByMember} />
+            </Card>
 
             <SectionHeader title="Quién gastó con qué" />
             <Card padding="md">

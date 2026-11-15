@@ -6,6 +6,7 @@ import type {
   BacklogTaskView,
   ShoppingItem,
   CardStatementDetail,
+  MethodMovements,
   FinanceSettings,
   MonthClosing,
   PaymentMethod,
@@ -307,6 +308,10 @@ export function deletePaymentMethod(methodId: number) {
 }
 
 /** Sin end, el último estado de cuenta que ya cortó. */
+export function getMethodMovements(methodId: number, end?: string): Promise<MethodMovements> {
+  return get(`/payment-methods/${methodId}/movements${end ? `?end=${end}` : ''}`);
+}
+
 export function getCardStatement(methodId: number, end?: string): Promise<CardStatementDetail> {
   return get(`/payment-methods/${methodId}/statement${end ? `?end=${end}` : ''}`);
 }

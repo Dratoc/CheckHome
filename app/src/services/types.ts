@@ -342,6 +342,21 @@ export type CardStatementDetail = CardStatement & {
   payments: { id: number; amount: number; paidOn: string; userId: number; paidBy: string }[];
 };
 
+/** Gastos de un débito o efectivo en un mes del hogar */
+export type MethodMovements = {
+  methodId: number;
+  name: string;
+  kind: PaymentMethodKind;
+  start: string;
+  end: string;
+  label: string;
+  isCurrent: boolean;
+  total: number;
+  prevEnd: string;
+  nextEnd: string;
+  charges: Movement[];
+};
+
 export type FinanceSettings = {
   /** Sin dato = mes calendario */
   cycleCutDay?: number;
