@@ -23,9 +23,10 @@ import * as api from '../../services/api';
 import { useHousehold } from '../../state/SessionProvider';
 import { useTheme } from '../../theme';
 import { monthName, today } from '../../utils/dates';
+import { SubjectsStrip } from '../subjects/SubjectsStrip';
 import { obligationBadge, obligationIcon, obligationSubtitle } from './obligationUi';
 
-/** Inicio: balance del mes, próximos vencimientos y checklist de hoy. */
+/** Inicio: balance del mes, mascotas y autos con su estado de hoy, próximos vencimientos y checklist de hoy. */
 export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
   const t = useTheme();
   const { user, household } = useHousehold();
@@ -33,6 +34,11 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
   const obligations = useQuery(() => api.listObligations(household.id), [household.id]);
   const routines = useQuery(() => api.listRoutines(household.id), [household.id]);
   const toggle = useRoutineToggle(user.id, routines.reload);
+  const pets = useQuery(() => api.listPets(household.id), [household.id]);
+  const vehicles = useQuery(() => api.listVehicles(household.id), [household.id]);
+  const petList = pets.data ?? [];
+  const vehicleList = vehicles.data ?? [];
+  const subjectsTitle = petList.length && vehicleList.length ? 'Mascotas y autos' : petList.length ? 'Mascotas' : 'Vehículos';
 
   const upcoming = (obligations.data ?? []).filter((o) => o.status !== 'ok').slice(0, 3);
   // Inicio muestra solo lo mío por hacer y el avance de la casa; la lista completa está en Tareas.
@@ -78,6 +84,20 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
           )}
         </QueryView>
       </Card>
+
+      {petList.length + vehicleList.length > 0 && (
+        <>
+          <SectionHeader title={subjectsTitle} action={petList.length ? 'Ver mascotas' : 'Ver autos'} onAction={() => navigation.navigate(petList.length ? 'Pets' : 'Vehicles')} />
+          <SubjectsStrip
+            pets={petList}
+            vehicles={vehicleList}
+            routines={routines.data ?? []}
+            toggle={toggle}
+            onOpenPet={(p) => navigation.navigate('Pet', { petId: p.id, name: p.name })}
+            onOpenVehicle={() => navigation.navigate('Vehicles')}
+          />
+        </>
+      )}
 
       <SectionHeader title="Próximos vencimientos" action="Ver todo" onAction={() => navigation.navigate('Accounts')} />
       <Card padding="md">

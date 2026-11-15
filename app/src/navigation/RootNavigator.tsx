@@ -22,6 +22,10 @@ import { ObligationDetailScreen } from '../screens/ObligationDetailScreen';
 import { AddPropertyScreen } from '../screens/forms/AddPropertyScreen';
 import { AddAttachmentScreen } from '../screens/forms/AddAttachmentScreen';
 import { AddVehicleScreen } from '../screens/forms/AddVehicleScreen';
+import { AddKeyDateScreen } from '../screens/forms/AddKeyDateScreen';
+import { AddPetScreen } from '../screens/forms/AddPetScreen';
+import { PetScreen } from '../screens/subjects/PetScreen';
+import { PetsScreen } from '../screens/subjects/PetsScreen';
 import { LoansScreen } from '../screens/assets/LoansScreen';
 import { PropertiesScreen } from '../screens/assets/PropertiesScreen';
 import { VehiclesScreen } from '../screens/assets/VehiclesScreen';
@@ -102,6 +106,10 @@ export function RootNavigator() {
             <Stack.Screen name="AddRoutine" component={AddRoutineScreen} options={({ route }) => ({ title: route.params?.routine ? 'Editar rutina' : 'Nueva rutina', presentation: 'modal' })} />
             <Stack.Screen name="EditTask" component={EditTaskScreen} options={{ title: 'Editar tarea', presentation: 'modal' }} />
             <Stack.Screen name="Shopping" component={ShoppingScreen} options={{ title: 'Lista de compras' }} />
+            <Stack.Screen name="Pets" component={PetsScreen} options={{ title: 'Mascotas' }} />
+            <Stack.Screen name="Pet" component={PetScreen} options={({ route }) => ({ title: route.params.name })} />
+            <Stack.Screen name="AddPet" component={AddPetScreen} options={({ route }) => ({ title: route.params?.pet ? 'Editar mascota' : 'Nueva mascota', presentation: 'modal' })} />
+            <Stack.Screen name="AddKeyDate" component={AddKeyDateScreen} options={({ route }) => ({ title: route.params.keyDate ? 'Editar fecha' : 'Nueva fecha clave', presentation: 'modal' })} />
             <Stack.Screen name="Vehicles" component={VehiclesScreen} options={{ title: 'Vehículos' }} />
             <Stack.Screen name="AddVehicle" component={AddVehicleScreen} options={({ route }) => ({ title: route.params?.vehicle ? 'Editar vehículo' : 'Nuevo vehículo', presentation: 'modal' })} />
             <Stack.Screen name="AddAttachment" component={AddAttachmentScreen} options={({ route }) => ({ title: route.params.attachment ? 'Editar documento' : 'Adjuntar documento', presentation: 'modal' })} />

@@ -8,6 +8,7 @@ import { badRequest, conflict, forbidden, notFound } from './errors.js';
 import { getUf } from './uf.js';
 import { cardStatementIn, cycleLabel, cycleOf, dueDateOf, nextCycle, previousCycle, statementPaidOn } from './cycle.js';
 import { computeClosing, computeShares } from './closing.js';
+import { categoryInput } from './categories.js';
 
 export const router = Router();
 
@@ -905,11 +906,13 @@ router.get(
     const vehicles = await query('SELECT * FROM dbo.vehicles WHERE household_id = @h ORDER BY id', { h: hid });
     const obligations = await obligationViews(hid);
     const files = await attachmentViews(hid);
+    const dates = await keyDateViews(hid);
     res.json(
       vehicles.map((v) => ({
         ...vehicleRow(v),
         documents: obligations.filter((o) => o.vehicleId === v.id),
         attachments: files.filter((a) => a.vehicleId === v.id),
+        keyDates: dates.filter((d) => d.vehicleId === v.id),
       })),
     );
   }),
@@ -924,7 +927,7 @@ router.post(
       h: hid,
       ...vehicleInput(req.body),
     });
-    res.status(201).json({ ...vehicleRow(row), documents: [], attachments: [] });
+    res.status(201).json({ ...vehicleRow(row), documents: [], attachments: [], keyDates: [] });
   }),
 );
 
@@ -940,13 +943,18 @@ router.patch(
   }),
 );
 
-/** Borra el vehículo y sus documentos adjuntos. Sus papeles quedan como cuentas sueltas, con su historial. */
+/**
+ * Borra el vehículo, sus documentos adjuntos y sus fechas clave. Sus papeles quedan como cuentas sueltas, con su
+ * historial, y sus rutinas quedan como rutinas de la casa.
+ */
 router.delete(
   '/vehicles/:id',
   h(async (req, res) => {
     const v = await vehicleOf(req);
     await transaction(async (tx) => {
       await query('DELETE FROM dbo.attachments WHERE vehicle_id = @v', { v: v.id }, tx);
+      await query('DELETE FROM dbo.key_dates WHERE vehicle_id = @v', { v: v.id }, tx);
+      await query('UPDATE dbo.routines SET vehicle_id = NULL WHERE vehicle_id = @v', { v: v.id }, tx);
       await query('UPDATE dbo.obligations SET vehicle_id = NULL WHERE vehicle_id = @v', { v: v.id }, tx);
       await query('DELETE FROM dbo.vehicles WHERE id = @v', { v: v.id }, tx);
     });
@@ -1045,7 +1053,10 @@ router.delete(
 // ---------- Documentos adjuntos (foto o PDF de vehículos y propiedades) ----------
 // Los archivos viven en Azure SQL (dbo.attachment_files) para no pagar Blob Storage: ver docs/adr/0004.
 
-const ATTACHMENT_KINDS = ['circulation_permit', 'technical_review', 'soap', 'insurance', 'registration', 'license', 'deed', 'lease', 'property_tax', 'other'];
+const ATTACHMENT_KINDS = [
+  'circulation_permit', 'technical_review', 'soap', 'insurance', 'registration', 'license', 'deed', 'lease', 'property_tax',
+  'vaccination_card', 'vet_record', 'pet_registry', 'other',
+];
 export const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
 /** Tope por hogar: unos cientos de documentos comprimidos, lejos de los 32 GB gratis de la base. */
 export const MAX_HOUSEHOLD_ATTACHMENT_BYTES = 200 * 1024 * 1024;
@@ -1065,6 +1076,7 @@ function attachmentView(r) {
     householdId: r.household_id,
     vehicleId: r.vehicle_id ?? undefined,
     propertyId: r.property_id ?? undefined,
+    petId: r.pet_id ?? undefined,
     obligationId: r.obligation_id ?? undefined,
     kind: r.kind,
     title: r.title,
@@ -1114,12 +1126,13 @@ async function attachmentOwner(b, hid) {
     const [o] = await query('SELECT vehicle_id, property_id FROM dbo.obligations WHERE id = @o AND household_id = @h', { o: oid, h: hid });
     if (!o) throw badRequest('El papel no es válido.');
     if (o.vehicle_id == null && o.property_id == null) throw badRequest('Ese papel no está ligado a un vehículo ni a una propiedad.');
-    return { vid: o.vehicle_id, pid: o.vehicle_id == null ? o.property_id : null, oid };
+    return { vid: o.vehicle_id, pid: o.vehicle_id == null ? o.property_id : null, pet: null, oid };
   }
   const vid = await linkedId('vehicles', b.vehicleId, hid, 'El vehículo');
   const pid = vid == null ? await linkedId('properties', b.propertyId, hid, 'La propiedad') : null;
-  if (vid == null && pid == null) throw badRequest('Elige el vehículo o la propiedad del documento.');
-  return { vid, pid, oid: null };
+  const pet = vid == null && pid == null ? await linkedId('pets', b.petId, hid, 'La mascota') : null;
+  if (vid == null && pid == null && pet == null) throw badRequest('Elige el vehículo, la propiedad o la mascota del documento.');
+  return { vid, pid, pet, oid: null };
 }
 
 async function attachmentOf(req) {
@@ -1153,9 +1166,9 @@ router.post(
     }
     const row = await transaction(async (tx) => {
       const [a] = await query(
-        `INSERT INTO dbo.attachments (household_id, vehicle_id, property_id, obligation_id, kind, title, expires_on, file_name, content_type, size_bytes, uploaded_by)
+        `INSERT INTO dbo.attachments (household_id, vehicle_id, property_id, pet_id, obligation_id, kind, title, expires_on, file_name, content_type, size_bytes, uploaded_by)
          OUTPUT INSERTED.*
-         VALUES (@h, @vid, @pid, @oid, @k, @t, @e, @fn, @ct, @sz, @u)`,
+         VALUES (@h, @vid, @pid, @pet, @oid, @k, @t, @e, @fn, @ct, @sz, @u)`,
         { h: hid, ...owner, ...meta, fn: file.fileName, ct: file.contentType, sz: file.content.length, u: req.userId },
         tx,
       );
@@ -1197,6 +1210,182 @@ router.post(
   }),
 );
 
+// ---------- Mascotas y fechas clave (migración 0009) ----------
+// Una mascota o un vehículo es un "sujeto": tiene rutinas propias (comida, paseo, lavar el auto) y fechas clave
+// (vacuna, antiparasitario, mantención) con la última vez y la próxima. Las fechas clave no son cuentas: no tienen monto.
+
+const PET_SPECIES = ['dog', 'cat', 'bird', 'fish', 'rabbit', 'other'];
+/** Una fecha clave "viene pronto" desde dos semanas antes. */
+const KEY_DATE_SOON_DAYS = 14;
+
+const petRow = (r) => ({ id: r.id, householdId: r.household_id, name: r.name, species: r.species, birthDate: fromSql(r.birth_date) });
+
+function petInput(b) {
+  const species = b.species ?? 'dog';
+  if (!PET_SPECIES.includes(species)) throw badRequest('El tipo de mascota no es válido.');
+  const birth = b.birthDate == null || b.birthDate === '' ? null : isoDate(b.birthDate, 'La fecha de nacimiento');
+  if (birth && birth > today()) throw badRequest('La fecha de nacimiento no puede ser futura.');
+  return { n: str(b.name, 'el nombre', { max: 50 }), sp: species, bd: date(birth) };
+}
+
+async function petOf(req) {
+  const id = idParam(req);
+  const [p] = await query('SELECT * FROM dbo.pets WHERE id = @p', { p: id });
+  if (!p) throw notFound('No encontramos esa mascota.');
+  await requireMember(p.household_id, req.userId);
+  return p;
+}
+
+function keyDateView(r) {
+  const nextOn = fromSql(r.next_on);
+  const daysLeft = nextOn ? daysUntil(nextOn) : undefined;
+  return {
+    id: r.id,
+    householdId: r.household_id,
+    petId: r.pet_id ?? undefined,
+    vehicleId: r.vehicle_id ?? undefined,
+    title: r.title,
+    lastOn: fromSql(r.last_on),
+    nextOn,
+    everyMonths: r.every_months ?? undefined,
+    daysLeft,
+    status: daysLeft == null ? 'none' : daysLeft < 0 ? 'overdue' : daysLeft <= KEY_DATE_SOON_DAYS ? 'due_soon' : 'ok',
+  };
+}
+
+async function keyDateViews(hid) {
+  const rows = await query("SELECT * FROM dbo.key_dates WHERE household_id = @h ORDER BY COALESCE(next_on, '9999-12-31'), id", { h: hid });
+  return rows.map(keyDateView);
+}
+
+/** Título, última vez, próxima y cada cuántos meses. Sin próxima, sale de la última más la repetición. */
+function keyDateInput(b) {
+  const last = b.lastOn == null || b.lastOn === '' ? null : isoDate(b.lastOn, 'La última vez');
+  if (last && last > today()) throw badRequest('La última vez no puede ser una fecha futura.');
+  const every = b.everyMonths == null || b.everyMonths === '' ? null : num(b.everyMonths, 'La repetición', { min: 1, max: 60, int: true });
+  let next = b.nextOn == null || b.nextOn === '' ? null : isoDate(b.nextOn, 'La próxima fecha');
+  if (!next && last && every) next = addMonths(last, every);
+  if (!last && !next) throw badRequest('Anota la última vez, la próxima fecha o ambas.');
+  return { t: str(b.title, 'el nombre', { max: 100 }), lo: date(last), no: date(next), em: every };
+}
+
+async function keyDateOf(req) {
+  const id = idParam(req);
+  const [k] = await query('SELECT * FROM dbo.key_dates WHERE id = @k', { k: id });
+  if (!k) throw notFound('No encontramos esa fecha.');
+  await requireMember(k.household_id, req.userId);
+  return k;
+}
+
+/** Mascotas con sus fechas clave y sus documentos (carnet de vacunas, ficha del veterinario). */
+router.get(
+  '/households/:id/pets',
+  h(async (req, res) => {
+    const hid = idParam(req);
+    await requireMember(hid, req.userId);
+    const pets = await query('SELECT * FROM dbo.pets WHERE household_id = @h ORDER BY id', { h: hid });
+    const dates = await keyDateViews(hid);
+    const files = await attachmentViews(hid);
+    res.json(
+      pets.map((p) => ({
+        ...petRow(p),
+        keyDates: dates.filter((d) => d.petId === p.id),
+        attachments: files.filter((a) => a.petId === p.id),
+      })),
+    );
+  }),
+);
+
+router.post(
+  '/households/:id/pets',
+  h(async (req, res) => {
+    const hid = idParam(req);
+    await requireMember(hid, req.userId);
+    const [row] = await query('INSERT INTO dbo.pets (household_id, name, species, birth_date) OUTPUT INSERTED.* VALUES (@h, @n, @sp, @bd)', {
+      h: hid,
+      ...petInput(req.body),
+    });
+    res.status(201).json({ ...petRow(row), keyDates: [], attachments: [] });
+  }),
+);
+
+router.patch(
+  '/pets/:id',
+  h(async (req, res) => {
+    const p = await petOf(req);
+    const [row] = await query('UPDATE dbo.pets SET name = @n, species = @sp, birth_date = @bd OUTPUT INSERTED.* WHERE id = @p', { p: p.id, ...petInput(req.body) });
+    res.json(petRow(row));
+  }),
+);
+
+/** Borra la mascota, sus fechas clave y sus documentos. Sus rutinas quedan como rutinas de la casa, con sus puntos. */
+router.delete(
+  '/pets/:id',
+  h(async (req, res) => {
+    const p = await petOf(req);
+    await transaction(async (tx) => {
+      await query('DELETE FROM dbo.attachments WHERE pet_id = @p', { p: p.id }, tx);
+      await query('DELETE FROM dbo.key_dates WHERE pet_id = @p', { p: p.id }, tx);
+      await query('UPDATE dbo.routines SET pet_id = NULL WHERE pet_id = @p', { p: p.id }, tx);
+      await query('DELETE FROM dbo.pets WHERE id = @p', { p: p.id }, tx);
+    });
+    res.status(204).end();
+  }),
+);
+
+/** Nueva fecha clave de una mascota (petId) o de un vehículo (vehicleId). */
+router.post(
+  '/households/:id/key-dates',
+  h(async (req, res) => {
+    const hid = idParam(req);
+    await requireMember(hid, req.userId);
+    const pet = await linkedId('pets', req.body.petId, hid, 'La mascota');
+    const veh = pet == null ? await linkedId('vehicles', req.body.vehicleId, hid, 'El vehículo') : null;
+    if (pet == null && veh == null) throw badRequest('Elige la mascota o el vehículo.');
+    const [row] = await query(
+      'INSERT INTO dbo.key_dates (household_id, pet_id, vehicle_id, title, last_on, next_on, every_months) OUTPUT INSERTED.* VALUES (@h, @pet, @veh, @t, @lo, @no, @em)',
+      { h: hid, pet, veh, ...keyDateInput(req.body) },
+    );
+    res.status(201).json(keyDateView(row));
+  }),
+);
+
+router.patch(
+  '/key-dates/:id',
+  h(async (req, res) => {
+    const k = await keyDateOf(req);
+    const [row] = await query('UPDATE dbo.key_dates SET title = @t, last_on = @lo, next_on = @no, every_months = @em OUTPUT INSERTED.* WHERE id = @k', {
+      k: k.id,
+      ...keyDateInput(req.body),
+    });
+    res.json(keyDateView(row));
+  }),
+);
+
+/** "Lo hicimos hoy": la última vez pasa a ser hoy y, si se repite, la próxima se corre. Sin repetición, no queda pendiente. */
+router.post(
+  '/key-dates/:id/done',
+  h(async (req, res) => {
+    const k = await keyDateOf(req);
+    const t = today();
+    const [row] = await query('UPDATE dbo.key_dates SET last_on = @lo, next_on = @no OUTPUT INSERTED.* WHERE id = @k', {
+      k: k.id,
+      lo: date(t),
+      no: date(k.every_months ? addMonths(t, k.every_months) : null),
+    });
+    res.json(keyDateView(row));
+  }),
+);
+
+router.delete(
+  '/key-dates/:id',
+  h(async (req, res) => {
+    const k = await keyDateOf(req);
+    await query('DELETE FROM dbo.key_dates WHERE id = @k', { k: k.id });
+    res.status(204).end();
+  }),
+);
+
 // ---------- Tareas ----------
 
 const periodStart = (frequency) => (frequency === 'daily' ? today() : weekStart(today()));
@@ -1226,6 +1415,9 @@ function routineView(r, votes, members, userId) {
     id: r.id,
     householdId: r.household_id,
     name: r.name,
+    category: r.category ?? undefined,
+    petId: r.pet_id ?? undefined,
+    vehicleId: r.vehicle_id ?? undefined,
     frequency: r.frequency,
     days: r.frequency === 'daily' ? daysFromMask(r.weekdays) : undefined,
     dueToday: dueToday(r),
@@ -1242,7 +1434,7 @@ function routineView(r, votes, members, userId) {
 async function routineViews(hid, userId, where = '', params = {}) {
   const p = { h: hid, d: date(today()), w: date(weekStart(today())), ...params };
   const rows = await query(
-    `SELECT r.id, r.household_id, r.name, r.frequency, r.weekdays, r.points, r.status, c.user_id AS done_by,
+    `SELECT r.id, r.household_id, r.name, r.category, r.pet_id, r.vehicle_id, r.frequency, r.weekdays, r.points, r.status, c.user_id AS done_by,
             k.user_id AS claimed_by
        FROM dbo.routines r
        LEFT JOIN dbo.routine_checks c ON c.routine_id = r.id AND c.period_start = IIF(r.frequency = 'daily', @d, @w)
@@ -1258,6 +1450,20 @@ async function routineViews(hid, userId, where = '', params = {}) {
   const [{ n: members }] = await query('SELECT COUNT(*) AS n FROM dbo.household_members WHERE household_id = @h', { h: hid });
   return rows.map((r) => routineView(r, votes, members, userId));
 }
+
+/**
+ * De qué mascota o vehículo es la rutina (uno solo, o ninguno). Si el cuerpo no trae ni petId ni vehicleId,
+ * se mantiene lo que tenía (keep) para no borrarlo desde una versión antigua de la app.
+ */
+async function subjectInput(b, hid, keep) {
+  const has = (k) => Object.prototype.hasOwnProperty.call(b, k);
+  if (!has('petId') && !has('vehicleId')) return keep ?? { pet: null, veh: null };
+  const pet = await linkedId('pets', b.petId, hid, 'La mascota');
+  const veh = pet == null ? await linkedId('vehicles', b.vehicleId, hid, 'El vehículo') : null;
+  return { pet, veh };
+}
+
+const subjectKind = (s) => (s.pet != null ? 'pet' : s.veh != null ? 'vehicle' : undefined);
 
 router.get(
   '/households/:id/routines',
@@ -1307,10 +1513,13 @@ router.post(
     const name = str(req.body.name, 'el nombre', { max: 100 });
     const weekdays = frequency === 'daily' ? weekdaysMask(req.body.days) : 127;
     const points = votePoints(req.body.points ?? 1);
+    const subject = await subjectInput(req.body, hid);
+    const category = categoryInput(req.body, name, { subject: subjectKind(subject) });
     const id = await transaction(async (tx) => {
       const [row] = await query(
-        "INSERT INTO dbo.routines (household_id, name, frequency, weekdays, points, status) OUTPUT INSERTED.id VALUES (@h, @n, @f, @wd, @p, 'estimating')",
-        { h: hid, n: name, f: frequency, wd: weekdays, p: points },
+        `INSERT INTO dbo.routines (household_id, name, category, pet_id, vehicle_id, frequency, weekdays, points, status)
+         OUTPUT INSERTED.id VALUES (@h, @n, @cat, @pet, @veh, @f, @wd, @p, 'estimating')`,
+        { h: hid, n: name, cat: category, ...subject, f: frequency, wd: weekdays, p: points },
         tx,
       );
       await voteRoutine(row.id, hid, req.userId, points, tx);
@@ -1405,9 +1614,13 @@ router.patch(
   h(async (req, res) => {
     const r = await routineOf(req);
     const frequency = req.body.frequency === 'weekly' ? 'weekly' : 'daily';
-    await query('UPDATE dbo.routines SET name = @n, frequency = @f, weekdays = @wd WHERE id = @r', {
+    const name = str(req.body.name, 'el nombre', { max: 100 });
+    const subject = await subjectInput(req.body, r.household_id, { pet: r.pet_id, veh: r.vehicle_id });
+    await query('UPDATE dbo.routines SET name = @n, category = @cat, pet_id = @pet, vehicle_id = @veh, frequency = @f, weekdays = @wd WHERE id = @r', {
       r: r.id,
-      n: str(req.body.name, 'el nombre', { max: 100 }),
+      n: name,
+      cat: categoryInput(req.body, name, { keep: r.category, subject: subjectKind(subject) }),
+      ...subject,
       f: frequency,
       wd: frequency === 'daily' ? weekdaysMask(req.body.days) : 127,
     });
@@ -1451,6 +1664,7 @@ router.get(
           id: t.id,
           householdId: t.household_id,
           title: t.title,
+          category: t.category ?? undefined,
           status: t.status,
           points: t.points ?? undefined,
           takenBy: t.taken_by ?? undefined,
@@ -1469,7 +1683,8 @@ router.post(
   h(async (req, res) => {
     const hid = idParam(req);
     await requireMember(hid, req.userId);
-    await query('INSERT INTO dbo.backlog_tasks (household_id, title) VALUES (@h, @t)', { h: hid, t: str(req.body.title, 'el título', { min: 3, max: 150 }) });
+    const title = str(req.body.title, 'el título', { min: 3, max: 150 });
+    await query('INSERT INTO dbo.backlog_tasks (household_id, title, category) VALUES (@h, @t, @cat)', { h: hid, t: title, cat: categoryInput(req.body, title) });
     res.status(201).end();
   }),
 );
@@ -1539,7 +1754,8 @@ router.patch(
   '/backlog/:id',
   h(async (req, res) => {
     const t = await backlogTask(req);
-    await query('UPDATE dbo.backlog_tasks SET title = @title WHERE id = @t', { t: t.id, title: str(req.body.title, 'el título', { min: 3, max: 150 }) });
+    const title = str(req.body.title, 'el título', { min: 3, max: 150 });
+    await query('UPDATE dbo.backlog_tasks SET title = @title, category = @cat WHERE id = @t', { t: t.id, title, cat: categoryInput(req.body, title, { keep: t.category }) });
     res.status(204).end();
   }),
 );

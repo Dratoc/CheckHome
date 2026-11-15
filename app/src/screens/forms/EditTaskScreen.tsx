@@ -1,23 +1,29 @@
 import { useState } from 'react';
-import { Button, Screen, Text, TextField } from '../../components';
+import { Button, ChoiceChips, Screen, Text, TextField } from '../../components';
 import { useMutation } from '../../hooks/useQuery';
 import type { RootScreenProps } from '../../navigation/types';
 import * as api from '../../services/api';
+import type { TaskCategory } from '../../services/types';
+import { CATEGORIES } from '../../utils/categories';
 import { confirmDanger } from '../../utils/confirm';
 
-/** Cambia el título de una tarea del backlog o la elimina. */
+type CategoryChoice = TaskCategory | 'none';
+const CATEGORY_CHOICES = [...CATEGORIES.map((c) => ({ value: c.value as CategoryChoice, label: c.label, icon: c.icon })), { value: 'none' as CategoryChoice, label: 'Sin categoría' }];
+
+/** Cambia el título o la categoría de una tarea del backlog, o la elimina. */
 export function EditTaskScreen({ navigation, route }: RootScreenProps<'EditTask'>) {
   const { taskId } = route.params;
   const save = useMutation(api.renameTask);
   const remove = useMutation(api.deleteTask);
   const [title, setTitle] = useState(route.params.title);
+  const [category, setCategory] = useState<CategoryChoice>(route.params.category ?? 'none');
   const [submitted, setSubmitted] = useState(false);
   const invalid = title.trim().length < 3;
 
   const submit = async () => {
     setSubmitted(true);
     if (invalid) return;
-    if (await save.run(taskId, title.trim())) navigation.goBack();
+    if (await save.run(taskId, title.trim(), category === 'none' ? null : category)) navigation.goBack();
   };
 
   const onDelete = async () => {
@@ -28,6 +34,7 @@ export function EditTaskScreen({ navigation, route }: RootScreenProps<'EditTask'
   return (
     <Screen edges={['bottom']}>
       <TextField label="Tarea" value={title} onChangeText={setTitle} error={submitted && invalid ? 'Escribe al menos 3 letras.' : undefined} maxLength={150} onSubmitEditing={submit} />
+      <ChoiceChips label="Categoría" options={CATEGORY_CHOICES} value={category} onChange={setCategory} />
       {(save.error || remove.error) && (
         <Text color="danger" accessibilityRole="alert">
           {save.error ?? remove.error}

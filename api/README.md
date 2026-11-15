@@ -31,6 +31,14 @@ Con `Authorization: Bearer <token>`: `/me`, `/households` (listar, crear, `join`
 `backlog`, `ranking`; además `/obligations/:id/pay`, `/income-sources/:id/incomes`, `/routines/:id/toggle` y
 `/backlog/:id/vote|take|complete`. Cada ruta revisa que la persona sea miembro del hogar.
 
+Categorías, mascotas y fechas clave (migración `0009`): las rutinas y tareas del backlog aceptan `category` (lista fija en
+`src/categories.js`; si no viene, se adivina por el nombre y `null` la deja sin categoría). Las rutinas aceptan `petId` o
+`vehicleId` (de quién es; entonces la categoría es Mascotas o Autos). `GET|POST /households/:id/pets` (cada mascota con sus
+fechas clave y documentos), `PATCH`/`DELETE /pets/:id` (al borrarla, sus rutinas quedan de la casa).
+`POST /households/:id/key-dates` (de una mascota o un vehículo: `lastOn`, `nextOn`, `everyMonths`; sin `nextOn` se calcula),
+`PATCH`/`DELETE /key-dates/:id` y `POST /key-dates/:id/done` ("hecho hoy": corre la próxima). Los vehículos traen sus
+`keyDates` y los documentos aceptan `petId`.
+
 Lista de compras (migración `0007`): `GET|POST /households/:id/shopping`, `DELETE /households/:id/shopping/bought`
 (saca lo comprado), `POST /shopping/:id/toggle` (comprado / pendiente) y `DELETE /shopping/:id`.
 

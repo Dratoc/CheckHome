@@ -473,3 +473,80 @@ test('medios de pago, cuadratura de la tarjeta y cierre del mes', { skip: !cs &&
   assert.equal(all.find((m) => m.id === debitB.id).isArchived, true);
   assert.equal((await call('GET', `/households/${hid}/payment-methods`, null, ta)).body.length, 1);
 });
+
+test('categorías, mascotas y fechas clave', { skip: !cs && 'sin TEST_SQL_CONNECTION_STRING' }, async () => {
+  const sfx = 'p' + Date.now().toString(36);
+  const a = (await call('POST', '/auth/register', { email: `a${sfx}@x.cl`, username: `ana${sfx}`, displayName: 'Ana', password: 'secreta123' })).body;
+  const ta = a.token;
+  const hid = (await call('POST', '/households', { name: 'Casa' }, ta)).body.id;
+  const other = (await call('POST', '/households', { name: 'Otra' }, ta)).body.id;
+
+  // Categorías: se adivinan por el nombre si no vienen; null explícito la deja sin categoría.
+  const loza = (await call('POST', `/households/${hid}/routines`, { name: 'Lavar la loza', frequency: 'daily', points: 1 }, ta)).body;
+  assert.equal(loza.category, 'kitchen');
+  const bano = (await call('POST', `/households/${hid}/routines`, { name: 'Limpiar el baño', frequency: 'weekly', points: 2 }, ta)).body;
+  assert.equal(bano.category, 'bathroom', 'baño gana sobre limpieza');
+  const libre = (await call('POST', `/households/${hid}/routines`, { name: 'Lavar la loza', frequency: 'daily', points: 1, category: null }, ta)).body;
+  assert.equal(libre.category, undefined);
+  assert.equal((await call('POST', `/households/${hid}/routines`, { name: 'X', frequency: 'daily', points: 1, category: 'zoo' }, ta)).status, 400);
+  const kept = (await call('PATCH', `/routines/${loza.id}`, { name: 'Secar platos', frequency: 'daily' }, ta)).body;
+  assert.equal(kept.category, 'kitchen', 'sin category en el cuerpo, se mantiene');
+  const moved = (await call('PATCH', `/routines/${loza.id}`, { name: 'Secar platos', frequency: 'daily', category: 'cleaning' }, ta)).body;
+  assert.equal(moved.category, 'cleaning');
+  await call('POST', `/households/${hid}/backlog`, { title: 'Arreglar el enchufe' }, ta);
+  const [task] = (await call('GET', `/households/${hid}/backlog`, null, ta)).body;
+  assert.equal(task.category, 'repairs');
+  await call('PATCH', `/backlog/${task.id}`, { title: 'Arreglar el enchufe del living', category: null }, ta);
+  assert.equal((await call('GET', `/households/${hid}/backlog`, null, ta)).body[0].category, undefined);
+
+  // Mascotas.
+  assert.equal((await call('POST', `/households/${hid}/pets`, { name: 'Luna', species: 'dragon' }, ta)).status, 400);
+  assert.equal((await call('POST', `/households/${hid}/pets`, { name: 'Luna', birthDate: '2999-01-01' }, ta)).status, 400);
+  const luna = await call('POST', `/households/${hid}/pets`, { name: 'Luna', species: 'dog', birthDate: '2020-03-01' }, ta);
+  assert.equal(luna.status, 201, JSON.stringify(luna.body));
+  const foreignPet = (await call('POST', `/households/${other}/pets`, { name: 'Ajena', species: 'cat' }, ta)).body;
+
+  // Rutina de una mascota: queda en Mascotas aunque el nombre diga otra cosa.
+  const comida = (await call('POST', `/households/${hid}/routines`, { name: 'Darle comida', frequency: 'daily', points: 1, petId: luna.body.id }, ta)).body;
+  assert.deepEqual([comida.petId, comida.category], [luna.body.id, 'pets']);
+  assert.equal((await call('POST', `/households/${hid}/routines`, { name: 'Comida', frequency: 'daily', points: 1, petId: foreignPet.id }, ta)).status, 400, 'mascota de otro hogar');
+  const keepPet = (await call('PATCH', `/routines/${comida.id}`, { name: 'Comida de la mañana', frequency: 'daily' }, ta)).body;
+  assert.equal(keepPet.petId, luna.body.id, 'sin petId en el cuerpo, se mantiene');
+
+  // Fechas clave: la próxima sale de la última más la repetición; "lo hicimos hoy" la corre.
+  assert.equal((await call('POST', `/households/${hid}/key-dates`, { petId: luna.body.id, title: 'Vacuna' }, ta)).status, 400, 'sin fechas');
+  assert.equal((await call('POST', `/households/${hid}/key-dates`, { title: 'Vacuna', nextOn: '2027-01-01' }, ta)).status, 400, 'sin dueño');
+  const vacuna = await call('POST', `/households/${hid}/key-dates`, { petId: luna.body.id, title: 'Vacuna antirrábica', lastOn: '2026-03-10', everyMonths: 12 }, ta);
+  assert.equal(vacuna.status, 201, JSON.stringify(vacuna.body));
+  assert.equal(vacuna.body.nextOn, '2027-03-10');
+  const unica = (await call('POST', `/households/${hid}/key-dates`, { petId: luna.body.id, title: 'Esterilización', nextOn: '2020-01-01' }, ta)).body;
+  assert.equal(unica.status, 'overdue');
+  const done = (await call('POST', `/key-dates/${vacuna.body.id}/done`, {}, ta)).body;
+  assert.ok(done.lastOn > '2026-03-10');
+  assert.equal(done.nextOn > done.lastOn, true);
+  const doneOnce = (await call('POST', `/key-dates/${unica.id}/done`, {}, ta)).body;
+  assert.deepEqual([doneOnce.nextOn, doneOnce.status], [undefined, 'none'], 'sin repetición, ya no queda pendiente');
+
+  // Documento de la mascota.
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(100, 1)]);
+  const carnet = await call('POST', `/households/${hid}/attachments`, { petId: luna.body.id, kind: 'vaccination_card', title: 'Carnet', fileName: 'carnet.png', contentType: 'image/png', data: png.toString('base64') }, ta);
+  assert.equal(carnet.status, 201, JSON.stringify(carnet.body));
+  const [pet] = (await call('GET', `/households/${hid}/pets`, null, ta)).body;
+  assert.deepEqual([pet.name, pet.birthDate, pet.keyDates.length, pet.attachments.length], ['Luna', '2020-03-01', 2, 1]);
+
+  // Vehículo con rutina y fecha clave.
+  const car = (await call('POST', `/households/${hid}/vehicles`, { name: 'Auto' }, ta)).body;
+  const lavar = (await call('POST', `/households/${hid}/routines`, { name: 'Lavarlo', frequency: 'weekly', points: 2, vehicleId: car.id }, ta)).body;
+  assert.deepEqual([lavar.vehicleId, lavar.category], [car.id, 'vehicles']);
+  await call('POST', `/households/${hid}/key-dates`, { vehicleId: car.id, title: 'Mantención', nextOn: '2027-06-01', everyMonths: 6 }, ta);
+  const [v] = (await call('GET', `/households/${hid}/vehicles`, null, ta)).body;
+  assert.equal(v.keyDates[0].title, 'Mantención');
+
+  // Borrar: las rutinas quedan como rutinas de la casa.
+  assert.equal((await call('DELETE', `/pets/${luna.body.id}`, null, ta)).status, 204);
+  assert.equal((await call('DELETE', `/vehicles/${car.id}`, null, ta)).status, 204);
+  const left = (await call('GET', `/households/${hid}/routines`, null, ta)).body;
+  assert.equal(left.find((r) => r.id === comida.id).petId, undefined);
+  assert.equal(left.find((r) => r.id === lavar.id).vehicleId, undefined);
+  assert.equal((await call('GET', `/households/${hid}/pets`, null, ta)).body.length, 0);
+});

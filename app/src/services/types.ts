@@ -112,6 +112,9 @@ export type ObligationPayment = {
 
 export type Frequency = 'daily' | 'weekly';
 
+/** Categorías fijas de las tareas (la misma lista que la API, en api/src/categories.js). */
+export type TaskCategory = 'kitchen' | 'cleaning' | 'bathroom' | 'laundry' | 'pets' | 'garden' | 'vehicles' | 'repairs';
+
 /** estimating: los miembros la están valorando; active: ya se puede marcar. */
 export type RoutineStatus = 'estimating' | 'active';
 
@@ -119,6 +122,10 @@ export type Routine = {
   id: number;
   householdId: number;
   name: string;
+  category?: TaskCategory;
+  /** De qué mascota es (o de qué vehículo); como mucho uno de los dos */
+  petId?: number;
+  vehicleId?: number;
   frequency: Frequency;
   /** Solo diarias: días en que se repite, 1 = lunes … 7 = domingo */
   days?: number[];
@@ -147,6 +154,7 @@ export type BacklogTask = {
   id: number;
   householdId: number;
   title: string;
+  category?: TaskCategory;
   status: BacklogStatus;
   /** Puntos acordados: el voto más alto */
   points?: number;
@@ -201,8 +209,40 @@ export type Vehicle = {
   year?: number;
 };
 
-/** Vehículo con sus papeles (permiso, revisión técnica, SOAP, seguro) y sus documentos digitales. */
-export type VehicleView = Vehicle & { documents: ObligationView[]; attachments: Attachment[] };
+/** Vehículo con sus papeles (permiso, revisión técnica, SOAP, seguro), sus documentos digitales y sus fechas clave. */
+export type VehicleView = Vehicle & { documents: ObligationView[]; attachments: Attachment[]; keyDates: KeyDate[] };
+
+export type PetSpecies = 'dog' | 'cat' | 'bird' | 'fish' | 'rabbit' | 'other';
+
+export type Pet = {
+  id: number;
+  householdId: number;
+  name: string;
+  species: PetSpecies;
+  /** YYYY-MM-DD */
+  birthDate?: string;
+};
+
+/** Mascota con sus fechas clave (vacunas, antiparasitario) y sus documentos (carnet de vacunas). */
+export type PetView = Pet & { keyDates: KeyDate[]; attachments: Attachment[] };
+
+/**
+ * Fecha clave de una mascota o un vehículo: vacuna, antiparasitario, mantención. No es una cuenta (no tiene monto).
+ * Sin nextOn no queda nada pendiente: solo se recuerda la última vez.
+ */
+export type KeyDate = {
+  id: number;
+  householdId: number;
+  petId?: number;
+  vehicleId?: number;
+  title: string;
+  lastOn?: string;
+  nextOn?: string;
+  everyMonths?: number;
+  daysLeft?: number;
+  /** due_soon: 14 días o menos */
+  status: 'none' | 'ok' | 'due_soon' | 'overdue';
+};
 
 export type Property = {
   id: number;
@@ -230,16 +270,20 @@ export type AttachmentKind =
   | 'deed'
   | 'lease'
   | 'property_tax'
+  | 'vaccination_card'
+  | 'vet_record'
+  | 'pet_registry'
   | 'other';
 
 export type AttachmentContentType = 'application/pdf' | 'image/jpeg' | 'image/png' | 'image/webp';
 
-/** Documento digital (foto o PDF) de un vehículo o propiedad; si es la copia de un papel, obligationId lo liga. */
+/** Documento digital (foto o PDF) de un vehículo, propiedad o mascota; si es la copia de un papel, obligationId lo liga. */
 export type Attachment = {
   id: number;
   householdId: number;
   vehicleId?: number;
   propertyId?: number;
+  petId?: number;
   obligationId?: number;
   kind: AttachmentKind;
   title: string;

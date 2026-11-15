@@ -6,6 +6,7 @@ import {
   Badge,
   Button,
   Card,
+  IconCircle,
   ListItem,
   QueryView,
   Screen,
@@ -19,7 +20,7 @@ import * as api from '../../services/api';
 import { useHousehold, useSession } from '../../state/SessionProvider';
 import { useTheme, type ColorSchemePreference } from '../../theme';
 
-/** Hogar: miembros, código de invitación, cambiar de hogar y preferencias. */
+/** Hogar: miembros, código de invitación, mascotas y autos, cambiar de hogar y preferencias. */
 export function HouseholdScreen({ navigation }: TabScreenProps<'Household'>) {
   const t = useTheme();
   const { user, household } = useHousehold();
@@ -89,6 +90,23 @@ export function HouseholdScreen({ navigation }: TabScreenProps<'Household'>) {
             ))
           }
         </QueryView>
+      </Card>
+
+      <SectionHeader title="Mascotas y autos" />
+      <Card padding="md">
+        <ListItem
+          title="Mascotas"
+          subtitle="Comida, paseos, vacunas y antiparasitario"
+          leading={<IconCircle name="paw-outline" tone="points" />}
+          onPress={() => navigation.navigate('Pets')}
+          divider
+        />
+        <ListItem
+          title="Vehículos"
+          subtitle="Papeles, mantención y rutinas del auto"
+          leading={<IconCircle name="car-sport-outline" tone="primary" />}
+          onPress={() => navigation.navigate('Vehicles')}
+        />
       </Card>
 
       <SectionHeader title="Apariencia" />

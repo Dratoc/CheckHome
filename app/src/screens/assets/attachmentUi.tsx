@@ -18,14 +18,21 @@ export const attachmentKindLabel: Record<AttachmentKind, string> = {
   deed: 'Escritura',
   lease: 'Contrato de arriendo',
   property_tax: 'Contribuciones',
+  vaccination_card: 'Carnet de vacunas',
+  vet_record: 'Ficha veterinaria',
+  pet_registry: 'Registro y chip',
   other: 'Otro',
 };
 
 const VEHICLE_KINDS: AttachmentKind[] = ['circulation_permit', 'technical_review', 'soap', 'insurance', 'registration', 'license', 'other'];
 const PROPERTY_KINDS: AttachmentKind[] = ['deed', 'lease', 'property_tax', 'insurance', 'other'];
+const PET_KINDS: AttachmentKind[] = ['vaccination_card', 'vet_record', 'pet_registry', 'insurance', 'other'];
 
-export function attachmentKindChoices(owner: 'vehicle' | 'property'): Choice<AttachmentKind>[] {
-  return (owner === 'vehicle' ? VEHICLE_KINDS : PROPERTY_KINDS).map((k) => ({ value: k, label: attachmentKindLabel[k] }));
+export type AttachmentOwner = 'vehicle' | 'property' | 'pet';
+
+export function attachmentKindChoices(owner: AttachmentOwner): Choice<AttachmentKind>[] {
+  const kinds = owner === 'vehicle' ? VEHICLE_KINDS : owner === 'pet' ? PET_KINDS : PROPERTY_KINDS;
+  return kinds.map((k) => ({ value: k, label: attachmentKindLabel[k] }));
 }
 
 /** Adivina el tipo de documento por el nombre del papel ("Revisión técnica 2027" → technical_review). */
