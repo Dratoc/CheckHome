@@ -7,7 +7,9 @@ import {
   Badge,
   Button,
   Card,
+  CategoryFilter,
   Checkbox,
+  countByCategory,
   EmptyState,
   IconCircle,
   ListItem,
@@ -25,7 +27,8 @@ import { ExpenseFab } from '../../navigation/ExpenseFab';
 import * as api from '../../services/api';
 import type { RoutineWithCheck } from '../../services/api';
 import { repeatLabel } from '../../utils/weekdays';
-import type { BacklogTaskView, Member } from '../../services/types';
+import type { BacklogTaskView, Member, TaskCategory } from '../../services/types';
+import { categoryInfo, speciesEmoji } from '../../utils/categories';
 import { useHousehold } from '../../state/SessionProvider';
 import { useTheme } from '../../theme';
 
@@ -36,6 +39,9 @@ const pts = (n: number) => `${n} ${n === 1 ? 'pto' : 'pts'}`;
 /** Tareas: checklist de hoy, rutinas, backlog con planning poker y ranking de la semana. */
 export function TasksScreen() {
   const [section, setSection] = useState<Section>('today');
+  // El filtro de categoría se mantiene al cambiar entre Hoy, Rutinas y Backlog.
+  const [category, setCategory] = useState<TaskCategory>();
+  const filter = { category, setCategory };
   return (
     <Screen edges={['top']} overlay={<ExpenseFab />}>
       <Text variant="title" accessibilityRole="header">
@@ -52,9 +58,9 @@ export function TasksScreen() {
           { value: 'ranking', label: 'Ranking' },
         ]}
       />
-      {section === 'today' && <Today />}
-      {section === 'routines' && <Routines />}
-      {section === 'backlog' && <Backlog />}
+      {section === 'today' && <Today {...filter} />}
+      {section === 'routines' && <Routines {...filter} />}
+      {section === 'backlog' && <Backlog {...filter} />}
       {section === 'ranking' && <Ranking />}
     </Screen>
   );
@@ -89,11 +95,34 @@ function useMembers() {
   return (id?: number) => (id === undefined ? undefined : byId.get(id)?.displayName.split(' ')[0]);
 }
 
+type FilterProps = { category: TaskCategory | undefined; setCategory: (c: TaskCategory | undefined) => void };
+
+/**
+ * Cómo se presenta una tarea en la lista: el nombre de su mascota o vehículo ("🐶 Luna"), o si no, su categoría
+ * ("Cocina"). Así "Comida" de cada mascota se distingue sin tener que escribir el nombre en la tarea.
+ */
+function useTaskContext() {
+  const { household } = useHousehold();
+  const pets = useQuery(() => api.listPets(household.id), [household.id]);
+  const vehicles = useQuery(() => api.listVehicles(household.id), [household.id]);
+  return (r: { category?: TaskCategory; petId?: number; vehicleId?: number }) => {
+    const pet = r.petId ? pets.data?.find((p) => p.id === r.petId) : undefined;
+    if (pet) return `${speciesEmoji(pet.species)} ${pet.name}`;
+    const vehicle = r.vehicleId ? vehicles.data?.find((v) => v.id === r.vehicleId) : undefined;
+    if (vehicle) return `🚗 ${vehicle.name}`;
+    return categoryInfo(r.category)?.label;
+  };
+}
+
+const withContext = (context: string | undefined, rest: string) => (context ? `${context} · ${rest}` : rest);
+const matches = (category: TaskCategory | undefined) => (x: { category?: TaskCategory }) => !category || x.category === category;
+
 type Scope = 'mine' | 'house';
 
 /** Hoy: por defecto solo lo que falta. "Mías" es lo que elegí hacer; "De la casa", todo lo que toca hoy. */
-function Today() {
+function Today({ category, setCategory }: FilterProps) {
   const t = useTheme();
+  const contextOf = useTaskContext();
   const { user, household } = useHousehold();
   const query = useQuery(() => api.listRoutines(household.id), [household.id]);
   const backlog = useQuery(() => api.listBacklog(household.id, user.id), [household.id, user.id]);
@@ -120,12 +149,15 @@ function Today() {
       }
     >
       {(all) => {
-        const due = all.filter((r) => r.status === 'active' && r.dueToday);
+        const dueAll = all.filter((r) => r.status === 'active' && r.dueToday);
+        const myTasksAll = (backlog.data ?? []).filter((task) => task.status === 'taken' && task.takenBy === user.id);
+        const counts = countByCategory([...dueAll.filter((r) => !toggle.isChecked(r)), ...myTasksAll]);
+        const due = dueAll.filter(matches(category));
         const estimating = all.filter((r) => r.status === 'estimating').length;
         const todo = due.filter((r) => !toggle.isChecked(r));
         const done = due.filter(toggle.isChecked);
         const mineTodo = todo.filter((r) => r.claimedBy === user.id);
-        const myTasks = (backlog.data ?? []).filter((task) => task.status === 'taken' && task.takenBy === user.id);
+        const myTasks = myTasksAll.filter(matches(category));
         const mineDone = done.filter((r) => r.doneBy === user.id || (r.doneBy === undefined && r.claimedBy === user.id));
         const mineCount = mineTodo.length + myTasks.length;
         // Si no he elegido nada, parto viendo la casa para elegir; si ya tengo tareas, parto en las mías.
@@ -158,6 +190,12 @@ function Today() {
                 { value: 'house', label: 'De la casa', count: todo.length },
               ]}
             />
+            <CategoryFilter value={category} onChange={setCategory} counts={counts} />
+            {category && total === 0 && (
+              <Text variant="caption" color="textMuted">
+                Nada de {categoryInfo(category)?.label.toLowerCase()} {scope === 'mine' ? 'en tus tareas' : 'en la casa'} por ahora.
+              </Text>
+            )}
 
             {total > 0 && (
               <View style={{ gap: t.spacing.xs }}>
@@ -170,7 +208,7 @@ function Today() {
               </View>
             )}
 
-            {scope === 'mine' && mineCount === 0 && (
+            {!category && scope === 'mine' && mineCount === 0 && (
               <Card>
                 <EmptyState
                   title={finished.length > 0 ? '¡Listo por hoy!' : 'Aún no eliges tareas'}
@@ -191,7 +229,7 @@ function Today() {
                   <TaskRow
                     key={`r${r.id}`}
                     label={r.name}
-                    hint={`${when(r)} · +${pts(r.points ?? 0)}`}
+                    hint={withContext(contextOf(r), `${when(r)} · +${pts(r.points ?? 0)}`)}
                     onDone={hold(() => toggle.toggle(r))}
                     trailing={<Button label="Soltar" size="sm" variant="ghost" onPress={hold(() => release(r))} />}
                   />
@@ -200,14 +238,14 @@ function Today() {
                   <TaskRow
                     key={`t${task.id}`}
                     label={task.title}
-                    hint={`Backlog · +${pts(task.points ?? 0)}`}
+                    hint={withContext(contextOf(task), `Backlog · +${pts(task.points ?? 0)}`)}
                     onDone={hold(() => finishTask(task))}
                   />
                 ))}
               </Card>
             )}
 
-            {scope === 'house' && todo.length === 0 && (
+            {!category && scope === 'house' && todo.length === 0 && (
               <Card>
                 <EmptyState
                   title={done.length > 0 ? 'La casa está al día' : 'Hoy no toca nada'}
@@ -224,7 +262,7 @@ function Today() {
                     <TaskRow
                       key={r.id}
                       label={r.name}
-                      hint={`${when(r)} · +${pts(r.points ?? 0)}`}
+                      hint={withContext(contextOf(r), `${when(r)} · +${pts(r.points ?? 0)}`)}
                       onDone={hold(() => toggle.toggle(r))}
                       trailing={<Button label="Me la llevo" size="sm" variant="secondary" onPress={hold(() => claim(r))} />}
                     />
@@ -238,7 +276,7 @@ function Today() {
                 <SectionHeader title={`Ya tienen dueño (${taken.length})`} />
                 <Card>
                   {taken.map((r) => (
-                    <TaskRow key={r.id} label={r.name} hint={`${when(r)} · +${pts(r.points ?? 0)}`} onDone={hold(() => toggle.toggle(r))} trailing={ownerBadge(r)} />
+                    <TaskRow key={r.id} label={r.name} hint={withContext(contextOf(r), `${when(r)} · +${pts(r.points ?? 0)}`)} onDone={hold(() => toggle.toggle(r))} trailing={ownerBadge(r)} />
                   ))}
                 </Card>
               </>
@@ -365,8 +403,9 @@ function DoneSection({ title, count, open, onToggle, children }: { title: string
   );
 }
 
-function Routines() {
+function Routines({ category, setCategory }: FilterProps) {
   const t = useTheme();
+  const contextOf = useTaskContext();
   const { household } = useHousehold();
   const navigation = useNavigation();
   const query = useQuery(() => api.listRoutines(household.id), [household.id]);
@@ -387,11 +426,13 @@ function Routines() {
           </Card>
         }
       >
-        {(rows) => {
+        {(all) => {
+          const rows = all.filter(matches(category));
           const estimating = rows.filter((r) => r.status === 'estimating');
           const active = rows.filter((r) => r.status === 'active');
           return (
             <>
+              <CategoryFilter value={category} onChange={setCategory} counts={countByCategory(all)} />
               {estimating.length > 0 && <SectionHeader title="Por valorar" />}
               {estimating.map((r) => (
                 <Card key={r.id} padding="md">
@@ -399,7 +440,7 @@ function Routines() {
                     <View style={{ flex: 1 }}>
                       <Text variant="bodyStrong">{r.name}</Text>
                       <Text variant="caption" color="textMuted">
-                        {every(r)}
+                        {withContext(contextOf(r), every(r))}
                       </Text>
                     </View>
                     <Pressable
@@ -430,7 +471,7 @@ function Routines() {
                   <ListItem
                     key={r.id}
                     title={r.name}
-                    subtitle={`${every(r)} · Toca para editar`}
+                    subtitle={withContext(contextOf(r), `${every(r)} · Toca para editar`)}
                     trailing={<Badge label={`+${pts(r.points ?? 0)}`} tone="points" />}
                     onPress={() => navigation.navigate('AddRoutine', { routine: r })}
                     divider
@@ -446,7 +487,7 @@ function Routines() {
   );
 }
 
-function Backlog() {
+function Backlog({ category, setCategory }: FilterProps) {
   const t = useTheme();
   const navigation = useNavigation();
   const { user, household } = useHousehold();
@@ -479,7 +520,8 @@ function Backlog() {
         isEmpty={(d) => d.length === 0}
         empty={<EmptyState title="Backlog vacío" message="Anota tareas únicas: arreglos, limpiezas grandes, trámites." />}
       >
-        {(rows) => {
+        {(all) => {
+          const rows = all.filter(matches(category));
           const active = [...rows].filter((task) => task.status !== 'done').sort((a, b) => order[a.status] - order[b.status]);
           const done = rows.filter((task) => task.status === 'done');
           const renderTask = (task: BacklogTaskView) => (
@@ -490,7 +532,7 @@ function Backlog() {
                 </Text>
                 {task.points !== undefined && <Badge label={pts(task.points)} tone="points" />}
                 <Pressable
-                  onPress={() => navigation.navigate('EditTask', { taskId: task.id, title: task.title })}
+                  onPress={() => navigation.navigate('EditTask', { taskId: task.id, title: task.title, category: task.category })}
                   accessibilityRole="button"
                   accessibilityLabel={`Editar ${task.title}`}
                   hitSlop={8}
@@ -525,7 +567,13 @@ function Backlog() {
           );
           return (
             <>
-              {active.length === 0 && <EmptyState title="Nada pendiente" message="Todas las tareas del backlog están terminadas." />}
+              <CategoryFilter value={category} onChange={setCategory} counts={countByCategory(all.filter((task) => task.status !== 'done'))} />
+              {active.length === 0 && (
+                <EmptyState
+                  title="Nada pendiente"
+                  message={category ? `No hay tareas de ${categoryInfo(category)?.label.toLowerCase()} pendientes.` : 'Todas las tareas del backlog están terminadas.'}
+                />
+              )}
               {active.map(renderTask)}
               {done.length > 0 && (
                 <DoneSection title="Terminadas" count={done.length} open={showDone} onToggle={() => setShowDone((v) => !v)}>
@@ -534,7 +582,7 @@ function Backlog() {
                       key={task.id}
                       title={task.title}
                       subtitle={`La hizo ${nameOf(task.takenBy) ?? 'alguien'}${task.points !== undefined ? ` · ${pts(task.points)}` : ''}`}
-                      onPress={() => navigation.navigate('EditTask', { taskId: task.id, title: task.title })}
+                      onPress={() => navigation.navigate('EditTask', { taskId: task.id, title: task.title, category: task.category })}
                       divider
                     />
                   ))}

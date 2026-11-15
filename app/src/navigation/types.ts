@@ -1,7 +1,7 @@
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { CompositeScreenProps, NavigatorScreenParams } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import type { Attachment, AttachmentKind, IncomeSource, ObligationKind, PaymentMethod, Property, Routine, Vehicle } from '../services/types';
+import type { Attachment, AttachmentKind, IncomeSource, KeyDate, ObligationKind, PaymentMethod, Pet, Property, Routine, TaskCategory, Vehicle } from '../services/types';
 
 export type TabParamList = {
   Home: undefined;
@@ -30,10 +30,17 @@ export type RootStackParamList = {
   AddIncomeSource: { source?: IncomeSource; propertyId?: number } | undefined;
   AddIncome: { source: IncomeSource };
   EditIncome: { incomeId: number };
-  /** Con routine, edita esa rutina */
-  AddRoutine: { routine?: Routine } | undefined;
-  EditTask: { taskId: number; title: string };
+  /** Con routine, edita esa rutina; petId o vehicleId prellenan de quién es una nueva */
+  AddRoutine: { routine?: Routine; petId?: number; vehicleId?: number } | undefined;
+  EditTask: { taskId: number; title: string; category?: TaskCategory };
   Shopping: undefined;
+  // Mascotas y fechas clave
+  Pets: undefined;
+  Pet: { petId: number; name: string };
+  /** Con pet, la edita */
+  AddPet: { pet?: Pet } | undefined;
+  /** Con keyDate, la edita; si no, crea una para la mascota o el vehículo indicado */
+  AddKeyDate: { keyDate?: KeyDate; petId?: number; vehicleId?: number };
   // Patrimonio y deudas
   Vehicles: undefined;
   /** Con vehicle, lo edita */
@@ -42,12 +49,13 @@ export type RootStackParamList = {
   /** Con property, la edita */
   AddProperty: { property?: Property } | undefined;
   Loans: undefined;
-  /** Con attachment, lo edita; si no, sube uno nuevo al vehículo, propiedad o papel indicado */
+  /** Con attachment, lo edita; si no, sube uno nuevo al vehículo, propiedad, mascota o papel indicado */
   AddAttachment: {
     attachment?: Attachment;
-    owner?: 'vehicle' | 'property';
+    owner?: 'vehicle' | 'property' | 'pet';
     vehicleId?: number;
     propertyId?: number;
+    petId?: number;
     obligationId?: number;
     kind?: AttachmentKind;
     title?: string;

@@ -13,7 +13,7 @@ import { formatBytes, PickError, pickPdf, pickPhoto, takePhoto, type PickedFile 
 import { attachmentKindChoices, attachmentKindLabel } from '../assets/attachmentUi';
 
 /**
- * Adjuntar un documento digital (foto o PDF) a un vehículo, una propiedad o un papel con vencimiento.
+ * Adjuntar un documento digital (foto o PDF) a un vehículo, una propiedad, una mascota o un papel con vencimiento.
  * Con attachment, edita su tipo, nombre y vencimiento; el archivo se cambia subiendo uno nuevo.
  */
 export function AddAttachmentScreen({ navigation, route }: RootScreenProps<'AddAttachment'>) {
@@ -21,7 +21,7 @@ export function AddAttachmentScreen({ navigation, route }: RootScreenProps<'AddA
   const { household } = useHousehold();
   const p = route.params;
   const editing = p.attachment;
-  const owner = (editing ? (editing.vehicleId ? 'vehicle' : 'property') : p.owner) ?? 'vehicle';
+  const owner = (editing ? (editing.vehicleId ? 'vehicle' : editing.petId ? 'pet' : 'property') : p.owner) ?? 'vehicle';
 
   const [kind, setKind] = useState<AttachmentKind | undefined>(editing?.kind ?? p.kind);
   const [title, setTitle] = useState(editing?.title ?? p.title ?? (p.kind ? attachmentKindLabel[p.kind] : ''));
@@ -77,6 +77,7 @@ export function AddAttachmentScreen({ navigation, route }: RootScreenProps<'AddA
           ...meta,
           vehicleId: p.vehicleId,
           propertyId: p.propertyId,
+          petId: p.petId,
           obligationId: p.obligationId,
           fileName: file.fileName,
           contentType: file.contentType,
@@ -103,7 +104,7 @@ export function AddAttachmentScreen({ navigation, route }: RootScreenProps<'AddA
           setTitle(v);
           setTitleTouched(true);
         }}
-        placeholder="Ej: Revisión técnica 2026"
+        placeholder={owner === 'pet' ? 'Ej: Carnet de vacunas' : 'Ej: Revisión técnica 2026'}
         maxLength={100}
         error={submitted ? errors.title : undefined}
       />

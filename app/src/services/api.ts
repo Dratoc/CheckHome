@@ -17,7 +17,11 @@ import type {
   Frequency,
   IncomeSource,
   IncomeView,
+  KeyDate,
   Member,
+  Pet,
+  PetSpecies,
+  PetView,
   MonthSummary,
   Movement,
   MyHousehold,
@@ -28,6 +32,7 @@ import type {
   PropertyView,
   RankingRow,
   Routine,
+  TaskCategory,
   User,
   Vehicle,
   VehicleView,
@@ -403,10 +408,11 @@ export function listAttachments(householdId: number): Promise<Attachment[]> {
 
 export type AttachmentMeta = { kind: AttachmentKind; title: string; expiresOn?: string };
 
-/** El archivo ya comprimido, en base64. Dueño: vehicleId, propertyId u obligationId (el papel). */
+/** El archivo ya comprimido, en base64. Dueño: vehicleId, propertyId, petId u obligationId (el papel). */
 export type AttachmentUpload = AttachmentMeta & {
   vehicleId?: number;
   propertyId?: number;
+  petId?: number;
   obligationId?: number;
   fileName: string;
   contentType: AttachmentContentType;
@@ -444,6 +450,48 @@ export async function openAttachment(attachmentId: number): Promise<true> {
   }
 }
 
+// ---------- Mascotas y fechas clave ----------
+
+export type PetInput = { name: string; species: PetSpecies; birthDate?: string };
+
+/** Mascotas con sus fechas clave y sus documentos. */
+export function listPets(householdId: number): Promise<PetView[]> {
+  return get(`/households/${householdId}/pets`);
+}
+
+export function createPet(householdId: number, input: PetInput): Promise<Pet> {
+  return post(`/households/${householdId}/pets`, input);
+}
+
+export function updatePet(petId: number, input: PetInput): Promise<Pet> {
+  return patch(`/pets/${petId}`, input);
+}
+
+/** Borra la mascota, sus fechas y documentos; sus rutinas quedan como rutinas de la casa. */
+export function deletePet(petId: number) {
+  return del(`/pets/${petId}`);
+}
+
+/** Sin nextOn, la API la calcula con lastOn + everyMonths. */
+export type KeyDateInput = { title: string; lastOn?: string; nextOn?: string; everyMonths?: number };
+
+export function createKeyDate(householdId: number, owner: { petId?: number; vehicleId?: number }, input: KeyDateInput): Promise<KeyDate> {
+  return post(`/households/${householdId}/key-dates`, { ...owner, ...input });
+}
+
+export function updateKeyDate(keyDateId: number, input: KeyDateInput): Promise<KeyDate> {
+  return patch(`/key-dates/${keyDateId}`, input);
+}
+
+/** "Lo hicimos hoy": la última vez queda hoy y, si se repite, la próxima se corre. */
+export function markKeyDateDone(keyDateId: number): Promise<KeyDate> {
+  return post(`/key-dates/${keyDateId}/done`);
+}
+
+export function deleteKeyDate(keyDateId: number) {
+  return del(`/key-dates/${keyDateId}`);
+}
+
 // ---------- Tareas ----------
 
 /** doneBy: quién la marcó hecha en este período; claimedBy: quién la eligió para hacerla. */
@@ -453,8 +501,18 @@ export function listRoutines(householdId: number): Promise<RoutineWithCheck[]> {
   return get(`/households/${householdId}/routines`);
 }
 
-/** days: solo para diarias, 1 = lunes … 7 = domingo. */
-export type RoutineInput = { name: string; frequency: Frequency; days?: number[] };
+/**
+ * days: solo para diarias, 1 = lunes … 7 = domingo. category null = sin categoría. petId o vehicleId: de quién es
+ * (null = de la casa). Si es de una mascota o un vehículo, la API la deja en esa categoría.
+ */
+export type RoutineInput = {
+  name: string;
+  frequency: Frequency;
+  days?: number[];
+  category?: TaskCategory | null;
+  petId?: number | null;
+  vehicleId?: number | null;
+};
 
 /** Nace en votación; los puntos que elige quien la crea son su voto. */
 export function createRoutine(householdId: number, input: RoutineInput & { points: number }): Promise<Routine> {
@@ -500,6 +558,7 @@ export function voteTask(taskId: number, _userId: number, points: number): Promi
   return post(`/backlog/${taskId}/vote`, { points });
 }
 
+/** Sin category, la API la adivina por el título ("Arreglar el enchufe" → Arreglos). */
 export function addBacklogTask(householdId: number, _userId: number, title: string): Promise<void> {
   return post(`/households/${householdId}/backlog`, { title });
 }
@@ -512,8 +571,8 @@ export function completeTask(taskId: number, _userId?: number): Promise<void> {
   return post(`/backlog/${taskId}/complete`);
 }
 
-export function renameTask(taskId: number, title: string) {
-  return patch(`/backlog/${taskId}`, { title }).then(() => true as const);
+export function renameTask(taskId: number, title: string, category?: TaskCategory | null) {
+  return patch(`/backlog/${taskId}`, { title, category }).then(() => true as const);
 }
 
 export function deleteTask(taskId: number) {

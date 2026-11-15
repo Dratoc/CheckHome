@@ -1,28 +1,41 @@
 import { useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { Button, ChoiceChips, Screen, SegmentedControl, Text, TextField } from '../../components';
-import { useMutation } from '../../hooks/useQuery';
+import { useMutation, useQuery } from '../../hooks/useQuery';
 import type { RootScreenProps } from '../../navigation/types';
 import * as api from '../../services/api';
-import type { Frequency } from '../../services/types';
+import type { Frequency, TaskCategory } from '../../services/types';
 import { useHousehold } from '../../state/SessionProvider';
 import { useTheme } from '../../theme';
 import { confirmDanger } from '../../utils/confirm';
 import { ALL_DAYS, DAY_NAMES, DAY_SHORT } from '../../utils/weekdays';
+import { CATEGORIES, PET_ROUTINES, speciesEmoji, suggestCategory } from '../../utils/categories';
 
 const POINTS = api.FIBONACCI.map((n) => ({ value: n, label: String(n) }));
 
-const saveRoutine = (householdId: number, routineId: number | undefined, input: api.RoutineInput & { points: number }) =>
-  routineId ? api.updateRoutine(routineId, { name: input.name, frequency: input.frequency, days: input.days }) : api.createRoutine(householdId, input);
+const saveRoutine = (householdId: number, routineId: number | undefined, { points, ...input }: api.RoutineInput & { points: number }) =>
+  routineId ? api.updateRoutine(routineId, input) : api.createRoutine(householdId, { ...input, points });
+
+type CategoryChoice = TaskCategory | 'none';
+const CATEGORY_CHOICES = [...CATEGORIES.map((c) => ({ value: c.value as CategoryChoice, label: c.label, icon: c.icon })), { value: 'none' as CategoryChoice, label: 'Sin categoría' }];
+
+/** De quién es: 'house', 'p12' (mascota 12) o 'v3' (vehículo 3). */
+type SubjectKey = string;
+const subjectKey = (petId?: number, vehicleId?: number): SubjectKey => (petId ? `p${petId}` : vehicleId ? `v${vehicleId}` : 'house');
 
 /**
  * Nueva rutina: se define una vez y se repite cada día o cada semana. Nace en votación: los puntos que elige quien la
  * crea son su voto, y se habilita cuando votaron todos, con el voto más alto. Con routine, edita nombre y frecuencia.
  */
 export function AddRoutineScreen({ navigation, route }: RootScreenProps<'AddRoutine'>) {
+  const t = useTheme();
   const { household } = useHousehold();
   const routine = route.params?.routine;
   const save = useMutation(saveRoutine);
+  const pets = useQuery(() => api.listPets(household.id), [household.id]);
+  const vehicles = useQuery(() => api.listVehicles(household.id), [household.id]);
+  const [subject, setSubject] = useState<SubjectKey>(subjectKey(routine?.petId ?? route.params?.petId, routine?.vehicleId ?? route.params?.vehicleId));
+  const [chosenCategory, setChosenCategory] = useState<CategoryChoice | undefined>(routine ? (routine.category ?? 'none') : undefined);
   const remove = useMutation(api.deleteRoutine);
   const [name, setName] = useState(routine?.name ?? '');
   const [frequency, setFrequency] = useState<Frequency>(routine?.frequency ?? 'daily');
@@ -30,10 +43,29 @@ export function AddRoutineScreen({ navigation, route }: RootScreenProps<'AddRout
   const [points, setPoints] = useState<number>(1);
   const [submitted, setSubmitted] = useState(false);
 
+  const petId = subject.startsWith('p') ? Number(subject.slice(1)) : undefined;
+  const vehicleId = subject.startsWith('v') ? Number(subject.slice(1)) : undefined;
+  const pet = pets.data?.find((p) => p.id === petId);
+  // Hasta que la persona elija, la categoría se sugiere sola por el nombre. Si es de una mascota o auto, va ahí.
+  const category: CategoryChoice = petId ? 'pets' : vehicleId ? 'vehicles' : (chosenCategory ?? suggestCategory(name) ?? 'none');
+  const subjectOptions = [
+    { value: 'house', label: 'De la casa' },
+    ...(pets.data ?? []).map((p) => ({ value: `p${p.id}`, label: `${speciesEmoji(p.species)} ${p.name}` })),
+    ...(vehicles.data ?? []).map((v) => ({ value: `v${v.id}`, label: `🚗 ${v.name}` })),
+  ];
+
   const submit = async () => {
     setSubmitted(true);
-    if (name.trim().length < 3 || (frequency === 'daily' && days.length === 0)) return;
-    const r = await save.run(household.id, routine?.id, { name: name.trim(), frequency, days: frequency === 'daily' ? days : undefined, points });
+    if (name.trim().length < 2 || (frequency === 'daily' && days.length === 0)) return;
+    const r = await save.run(household.id, routine?.id, {
+      name: name.trim(),
+      frequency,
+      days: frequency === 'daily' ? days : undefined,
+      points,
+      category: category === 'none' ? null : category,
+      petId: petId ?? null,
+      vehicleId: vehicleId ?? null,
+    });
     if (r) navigation.goBack();
   };
 
@@ -45,7 +77,26 @@ export function AddRoutineScreen({ navigation, route }: RootScreenProps<'AddRout
 
   return (
     <Screen edges={['bottom']}>
-      <TextField label="Nombre" value={name} onChangeText={setName} placeholder="Ej: Lavar la loza" error={submitted && name.trim().length < 3 ? 'Ponle un nombre.' : undefined} maxLength={100} autoFocus={!routine} />
+      {subjectOptions.length > 1 && <ChoiceChips label="¿De quién es?" options={subjectOptions} value={subject} onChange={setSubject} />}
+      <TextField
+        label="Nombre"
+        value={name}
+        onChangeText={setName}
+        placeholder={pet ? 'Ej: Comida' : 'Ej: Lavar la loza'}
+        error={submitted && name.trim().length < 2 ? 'Ponle un nombre.' : undefined}
+        maxLength={100}
+        autoFocus={!routine && !route.params?.petId && !route.params?.vehicleId}
+      />
+      {pet && !routine && (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.spacing.xs }}>
+          {PET_ROUTINES.map((p) => (
+            <Button key={p.name} label={p.name} size="sm" variant={name === p.name ? 'secondary' : 'ghost'} onPress={() => setName(p.name)} />
+          ))}
+        </View>
+      )}
+      {!petId && !vehicleId && (
+        <ChoiceChips label={chosenCategory === undefined && category !== 'none' ? 'Categoría (sugerida)' : 'Categoría'} options={CATEGORY_CHOICES} value={category} onChange={setChosenCategory} />
+      )}
       <SegmentedControl<Frequency>
         value={frequency}
         onChange={setFrequency}
