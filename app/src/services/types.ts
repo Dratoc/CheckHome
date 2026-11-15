@@ -336,6 +336,8 @@ export type CardStatement = {
 export type CardStatementDetail = CardStatement & {
   prevEnd: string;
   nextEnd: string;
+  /** Corte del último estado ya cerrado: el que toca pagar ahora */
+  payableEnd: string;
   charges: Movement[];
   payments: { id: number; amount: number; paidOn: string; userId: number; paidBy: string }[];
 };
@@ -371,6 +373,13 @@ export type ClosingMember = {
   balance: number;
 };
 
+export type MemberSpend = {
+  userId: number;
+  name: string;
+  total: number;
+  methods: { methodId: number | null; name: string; kind: PaymentMethod['kind'] | null; amount: number }[];
+};
+
 export type Transfer = { fromUserId: number; fromName: string; toUserId: number; toName: string; amount: number };
 
 export type MonthClosing = {
@@ -383,6 +392,8 @@ export type MonthClosing = {
   savingsShortfall: number;
   isFinal: boolean;
   members: ClosingMember[];
+  /** Lo que anotó cada uno en el ciclo, por medio de pago (methodId null = sin indicar) */
+  spendByMember: MemberSpend[];
   cards: CardStatement[];
   transfers: Transfer[];
   closed?: { closedAt: string; closedBy: string; transfers: Transfer[] };

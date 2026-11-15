@@ -2050,20 +2050,22 @@ function statementView(m, st, charges, payments) {
 
 /**
  * Estado de cuenta de una tarjeta según la app ("facturado según la app"), para compararlo con el del banco.
- * ?end=YYYY-MM-DD elige el corte; por defecto, el último corte que ya pasó.
+ * ?end=YYYY-MM-DD elige el corte; por defecto, el período en curso (donde caen los gastos que se van anotando).
+ * payableEnd dice cuál es el último estado ya cerrado, el que toca pagar ahora.
  */
 router.get(
   '/payment-methods/:id/statement',
   h(async (req, res) => {
     const m = await methodOf(req);
     if (m.kind !== 'credit') throw badRequest('Solo las tarjetas de crédito tienen estado de cuenta.');
-    const st = req.query.end ? cycleOf(isoDate(req.query.end, 'El corte'), m.cut_day) : statementPaidOn(today(), m.cut_day);
+    const st = cycleOf(req.query.end ? isoDate(req.query.end, 'El corte') : today(), m.cut_day);
     const charges = await cardCharges(m.id, st);
     const payments = await cardPaymentsFor(m.id, st.end);
     res.json({
       ...statementView(m, st, charges, payments),
       prevEnd: previousCycle(st, m.cut_day).end,
       nextEnd: nextCycle(st, m.cut_day).end,
+      payableEnd: statementPaidOn(today(), m.cut_day).end,
       charges,
       payments: payments.map((p) => ({ id: p.id, amount: Number(p.amount), paidOn: fromSql(p.paid_on), userId: p.user_id, paidBy: p.display_name })),
     });
@@ -2226,13 +2228,13 @@ async function closingFor(hid, cycleEnd) {
   const p = { h: hid, from: date(cycle.start), to: date(cycle.end) };
 
   const expenses = await query(
-    `SELECT e.amount, e.user_id, e.personal_user_id, pm.kind AS method_kind, pm.owner_user_id
+    `SELECT e.amount, e.user_id, e.personal_user_id, e.payment_method_id, pm.kind AS method_kind, pm.name AS method_name, pm.owner_user_id
        FROM dbo.expenses e LEFT JOIN dbo.payment_methods pm ON pm.id = e.payment_method_id
       WHERE e.household_id = @h AND e.spent_on BETWEEN @from AND @to`,
     p,
   );
   const bills = await query(
-    `SELECT p.amount_clp AS amount, p.user_id, pm.kind AS method_kind, pm.owner_user_id
+    `SELECT p.amount_clp AS amount, p.user_id, p.payment_method_id, pm.kind AS method_kind, pm.name AS method_name, pm.owner_user_id
        FROM dbo.obligation_payments p JOIN dbo.obligations o ON o.id = p.obligation_id LEFT JOIN dbo.payment_methods pm ON pm.id = p.payment_method_id
       WHERE o.household_id = @h AND p.paid_on BETWEEN @from AND @to`,
     p,
@@ -2267,6 +2269,15 @@ async function closingFor(hid, cycleEnd) {
     add(payerOf(b), 'expenses', a);
   }
   for (const d of deposits) add(d.user_id, 'savings', Number(d.s));
+
+  // Lo que anotó cada uno, separado por medio de pago (gastos y cuentas pagadas, del hogar y personales).
+  const spent = {};
+  for (const r of [...expenses, ...bills]) {
+    const byMethod = (spent[r.user_id] ??= {});
+    const key = r.payment_method_id ?? 0;
+    byMethod[key] ??= { methodId: r.payment_method_id ?? null, name: r.method_name ?? 'Sin indicar', kind: r.method_kind ?? null, amount: 0 };
+    byMethod[key].amount += Number(r.amount);
+  }
 
   // Cada tarjeta: el estado que corta dentro de este ciclo, lo cargado según la app y lo pagado para ese estado.
   const cards = [];
@@ -2314,6 +2325,12 @@ async function closingFor(hid, cycleEnd) {
     savingsShortfall: result.savingsShortfall,
     isFinal: result.isFinal,
     members: result.members.map((m) => ({ ...m, name: names[m.userId] })),
+    spendByMember: fin.members.map((m) => {
+      const methods = Object.values(spent[m.userId] ?? {})
+        .map((x) => ({ ...x, amount: Math.round(x.amount) }))
+        .sort((a, b) => b.amount - a.amount);
+      return { userId: m.userId, name: m.name, total: methods.reduce((s, x) => s + x.amount, 0), methods };
+    }),
     cards,
     transfers: result.transfers.map((x) => ({ ...x, fromName: names[x.fromUserId], toName: names[x.toUserId] })),
     closed: closed

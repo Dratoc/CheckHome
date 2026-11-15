@@ -13,6 +13,7 @@ import { formatShortDate } from '../../utils/dates';
 /**
  * Estado de cuenta de la tarjeta según la app: lo cargado entre un corte y el siguiente ("facturado según la app"),
  * para compararlo con el del banco. Si no calza, falta anotar algo. Aquí también se anota el pago de la tarjeta.
+ * Abre en el período en curso, donde caen los gastos que se van anotando; el estado por pagar queda a un toque.
  */
 export function CardStatementScreen({ navigation, route }: RootScreenProps<'CardStatement'>) {
   const t = useTheme();
@@ -40,7 +41,11 @@ export function CardStatementScreen({ navigation, route }: RootScreenProps<'Card
               <Text variant="label">{s.label}</Text>
               <Button label="Siguiente ›" size="sm" variant="ghost" onPress={() => setEnd(s.nextEnd)} />
             </View>
-            <Summary s={s} onPay={() => navigation.navigate('PayCard', { methodId, name: s.name, statementEnd: s.end, label: s.label, suggested: s.pending })} />
+            <Summary
+              s={s}
+              onPay={() => navigation.navigate('PayCard', { methodId, name: s.name, statementEnd: s.end, label: s.label, suggested: s.pending })}
+              onShowPayable={() => setEnd(s.payableEnd)}
+            />
             {removePayment.error && <Text color="danger">{removePayment.error}</Text>}
 
             <SectionHeader title="Cargos anotados" />
@@ -100,7 +105,7 @@ export function CardStatementScreen({ navigation, route }: RootScreenProps<'Card
   );
 }
 
-function Summary({ s, onPay }: { s: CardStatementDetail; onPay: () => void }) {
+function Summary({ s, onPay, onShowPayable }: { s: CardStatementDetail; onPay: () => void; onShowPayable: () => void }) {
   const t = useTheme();
   const status = !s.isClosed ? { label: 'Período abierto', tone: 'neutral' as const } : s.pending > 0 ? { label: `Vence el ${formatShortDate(s.dueOn)}`, tone: 'warning' as const } : { label: 'Pagado', tone: 'success' as const };
   return (
@@ -122,8 +127,17 @@ function Summary({ s, onPay }: { s: CardStatementDetail; onPay: () => void }) {
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: t.spacing.sm }}>
         <Badge label={status.label} tone={status.tone} dot />
-        <Button label="Pagar tarjeta" size="sm" variant="secondary" onPress={onPay} />
+        {s.isClosed ? (
+          <Button label="Pagar tarjeta" size="sm" variant="secondary" onPress={onPay} />
+        ) : (
+          <Button label="Ver estado por pagar" size="sm" variant="secondary" onPress={onShowPayable} />
+        )}
       </View>
+      {!s.isClosed && (
+        <Text variant="caption" color="textMuted">
+          Aquí van los gastos que vas anotando; se facturan en el corte del {formatShortDate(s.end)}.
+        </Text>
+      )}
     </Card>
   );
 }
