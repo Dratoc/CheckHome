@@ -31,6 +31,9 @@ Con `Authorization: Bearer <token>`: `/me`, `/households` (listar, crear, `join`
 `backlog`, `ranking`; además `/obligations/:id/pay`, `/income-sources/:id/incomes`, `/routines/:id/toggle` y
 `/backlog/:id/vote|take|complete`. Cada ruta revisa que la persona sea miembro del hogar.
 
+Lista de compras (migración `0007`): `GET|POST /households/:id/shopping`, `DELETE /households/:id/shopping/bought`
+(saca lo comprado), `POST /shopping/:id/toggle` (comprado / pendiente) y `DELETE /shopping/:id`.
+
 Editar y borrar (`PATCH` y `DELETE`): `/expenses/:id` (quien lo anotó o un administrador), `/incomes/:id` y
 `/income-sources/:id` (solo su dueño; borrar una fuente borra sus pagos), `/obligations/:id` (borra también su
 historial), `/routines/:id` y `/backlog/:id`. Además `GET /expenses/:id`, `GET /incomes/:id`, `GET /obligations/:id`,

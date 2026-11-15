@@ -4,6 +4,7 @@ import type {
   AttachmentContentType,
   AttachmentKind,
   BacklogTaskView,
+  ShoppingItem,
   CardStatementDetail,
   FinanceSettings,
   MonthClosing,
@@ -511,4 +512,28 @@ export function deleteTask(taskId: number) {
 /** Puntos de la semana: rutinas marcadas + tareas del backlog terminadas. */
 export function getRanking(householdId: number): Promise<RankingRow[]> {
   return get(`/households/${householdId}/ranking`);
+}
+
+// ---------- Lista de compras ----------
+
+export function listShopping(householdId: number): Promise<ShoppingItem[]> {
+  return get(`/households/${householdId}/shopping`);
+}
+
+export function addShoppingItem(householdId: number, name: string, quantity?: string): Promise<void> {
+  return post(`/households/${householdId}/shopping`, { name, quantity });
+}
+
+/** Marca como comprado o lo vuelve a dejar pendiente. */
+export function toggleShoppingItem(itemId: number): Promise<void> {
+  return post(`/shopping/${itemId}/toggle`);
+}
+
+export function deleteShoppingItem(itemId: number) {
+  return del(`/shopping/${itemId}`);
+}
+
+/** Saca de la lista todo lo que ya se compró. */
+export function clearBoughtShopping(householdId: number) {
+  return del(`/households/${householdId}/shopping/bought`);
 }

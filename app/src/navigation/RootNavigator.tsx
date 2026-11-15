@@ -17,6 +17,7 @@ import { AddObligationScreen } from '../screens/forms/AddObligationScreen';
 import { AddRoutineScreen } from '../screens/forms/AddRoutineScreen';
 import { EditIncomeScreen } from '../screens/forms/EditIncomeScreen';
 import { EditTaskScreen } from '../screens/forms/EditTaskScreen';
+import { ShoppingScreen } from '../screens/ShoppingScreen';
 import { ObligationDetailScreen } from '../screens/ObligationDetailScreen';
 import { AddPropertyScreen } from '../screens/forms/AddPropertyScreen';
 import { AddAttachmentScreen } from '../screens/forms/AddAttachmentScreen';
@@ -100,6 +101,7 @@ export function RootNavigator() {
             <Stack.Screen name="EditIncome" component={EditIncomeScreen} options={{ title: 'Editar ingreso', presentation: 'modal' }} />
             <Stack.Screen name="AddRoutine" component={AddRoutineScreen} options={({ route }) => ({ title: route.params?.routine ? 'Editar rutina' : 'Nueva rutina', presentation: 'modal' })} />
             <Stack.Screen name="EditTask" component={EditTaskScreen} options={{ title: 'Editar tarea', presentation: 'modal' }} />
+            <Stack.Screen name="Shopping" component={ShoppingScreen} options={{ title: 'Lista de compras' }} />
             <Stack.Screen name="Vehicles" component={VehiclesScreen} options={{ title: 'Vehículos' }} />
             <Stack.Screen name="AddVehicle" component={AddVehicleScreen} options={({ route }) => ({ title: route.params?.vehicle ? 'Editar vehículo' : 'Nuevo vehículo', presentation: 'modal' })} />
             <Stack.Screen name="AddAttachment" component={AddAttachmentScreen} options={({ route }) => ({ title: route.params.attachment ? 'Editar documento' : 'Adjuntar documento', presentation: 'modal' })} />
