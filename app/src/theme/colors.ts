@@ -98,3 +98,12 @@ export const darkColors: ColorTokens = {
   overlay: 'rgba(0, 0, 0, 0.6)',
   shadow: '#000000',
 };
+
+/**
+ * Gráficos: colores por serie en orden fijo, validados para daltonismo contra la superficie de cada modo.
+ * none = "Sin indicar". Van aparte de ColorTokens porque son una lista, no un color.
+ */
+export const chartColors = {
+  light: { series: ['#2A78D6', '#EB6834', '#1BAF7A', '#EDA100', '#E87BA4'], none: '#B5B9B7' },
+  dark: { series: ['#3987E5', '#D95926', '#199E70', '#C98500', '#D55181'], none: '#5E6664' },
+} as const;

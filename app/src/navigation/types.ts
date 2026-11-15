@@ -65,8 +65,10 @@ export type RootStackParamList = {
   PaymentMethods: undefined;
   /** Con method, lo edita */
   AddPaymentMethod: { method?: PaymentMethod } | undefined;
-  /** Sin end, el último estado que ya cortó */
+  /** Sin end, el período en curso */
   CardStatement: { methodId: number; name: string; end?: string };
+  /** Débito o efectivo: sus gastos por mes del hogar. Sin end, el mes en curso */
+  MethodMovements: { methodId: number; name: string; end?: string };
   PayCard: { methodId: number; name: string; statementEnd: string; label: string; suggested: number };
   /** Sin end, el mes del hogar de hoy */
   Closing: { end?: string } | undefined;

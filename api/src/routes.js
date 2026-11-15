@@ -2049,6 +2049,34 @@ function statementView(m, st, charges, payments) {
 }
 
 /**
+ * Gastos y cuentas pagados con un débito o efectivo en un mes del hogar (mismo ciclo del cierre del mes).
+ * ?end=YYYY-MM-DD elige el mes; por defecto, el que está en curso.
+ */
+router.get(
+  '/payment-methods/:id/movements',
+  h(async (req, res) => {
+    const m = await methodOf(req);
+    const fin = await householdFinance(m.household_id);
+    const cut = fin.cycleCutDay ?? null;
+    const c = cycleOf(req.query.end ? isoDate(req.query.end, 'El mes') : today(), cut);
+    const charges = await cardCharges(m.id, c);
+    res.json({
+      methodId: m.id,
+      name: m.name,
+      kind: m.kind,
+      start: c.start,
+      end: c.end,
+      label: cycleLabel(c),
+      isCurrent: c.start <= today() && today() <= c.end,
+      total: charges.reduce((s, x) => s + x.amount, 0),
+      prevEnd: previousCycle(c, cut).end,
+      nextEnd: nextCycle(c, cut).end,
+      charges,
+    });
+  }),
+);
+
+/**
  * Estado de cuenta de una tarjeta según la app ("facturado según la app"), para compararlo con el del banco.
  * ?end=YYYY-MM-DD elige el corte; por defecto, el período en curso (donde caen los gastos que se van anotando).
  * payableEnd dice cuál es el último estado ya cerrado, el que toca pagar ahora.
