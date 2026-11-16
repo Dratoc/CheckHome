@@ -11,6 +11,7 @@ import {
   Checkbox,
   countByCategory,
   EmptyState,
+  Fab,
   IconCircle,
   ListItem,
   ProgressBar,
@@ -23,7 +24,6 @@ import {
 } from '../../components';
 import { useMutation, useQuery } from '../../hooks/useQuery';
 import { useRoutineToggle } from '../../hooks/useRoutineToggle';
-import { ExpenseFab } from '../../navigation/ExpenseFab';
 import * as api from '../../services/api';
 import type { RoutineWithCheck } from '../../services/api';
 import { repeatLabel } from '../../utils/weekdays';
@@ -42,8 +42,11 @@ export function TasksScreen() {
   // El filtro de categoría se mantiene al cambiar entre Hoy, Rutinas y Backlog.
   const [category, setCategory] = useState<TaskCategory>();
   const filter = { category, setCategory };
+  const navigation = useNavigation();
+  // Aquí no se anotan gastos: el botón flotante solo aparece en Rutinas, para agregar una. Backlog ya tiene su campo.
+  const fab = section === 'routines' ? <Fab label="Rutina" accessibilityLabel="Agregar rutina" onPress={() => navigation.navigate('AddRoutine')} /> : undefined;
   return (
-    <Screen edges={['top']} overlay={<ExpenseFab />}>
+    <Screen edges={['top']} overlay={fab}>
       <Text variant="title" accessibilityRole="header">
         Tareas
       </Text>

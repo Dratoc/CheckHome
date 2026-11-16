@@ -33,6 +33,7 @@ import { AddPaymentMethodScreen } from '../screens/money/AddPaymentMethodScreen'
 import { AddSavingsScreen } from '../screens/money/AddSavingsScreen';
 import { CardStatementScreen } from '../screens/money/CardStatementScreen';
 import { MethodMovementsScreen } from '../screens/money/MethodMovementsScreen';
+import { MovementsScreen } from '../screens/money/MovementsScreen';
 import { ClosingScreen } from '../screens/money/ClosingScreen';
 import { FinanceSettingsScreen } from '../screens/money/FinanceSettingsScreen';
 import { PaymentMethodsScreen } from '../screens/money/PaymentMethodsScreen';
@@ -122,6 +123,7 @@ export function RootNavigator() {
             <Stack.Screen name="CardStatement" component={CardStatementScreen} options={({ route }) => ({ title: route.params.name })} />
             <Stack.Screen name="MethodMovements" component={MethodMovementsScreen} options={({ route }) => ({ title: route.params.name })} />
             <Stack.Screen name="PayCard" component={PayCardScreen} options={{ title: 'Pagar tarjeta', presentation: 'modal' }} />
+            <Stack.Screen name="Movements" component={MovementsScreen} options={{ title: 'Movimientos' }} />
             <Stack.Screen name="Closing" component={ClosingScreen} options={{ title: 'Cierre del mes' }} />
             <Stack.Screen name="FinanceSettings" component={FinanceSettingsScreen} options={{ title: 'Ajustes del reparto', presentation: 'modal' }} />
             <Stack.Screen name="AddSavings" component={AddSavingsScreen} options={{ title: 'Depósito al ahorro', presentation: 'modal' }} />

@@ -70,6 +70,8 @@ export type RootStackParamList = {
   /** Débito o efectivo: sus gastos por mes del hogar. Sin end, el mes en curso */
   MethodMovements: { methodId: number; name: string; end?: string };
   PayCard: { methodId: number; name: string; statementEnd: string; label: string; suggested: number };
+  /** Historial completo de movimientos, un mes a la vez. Sin end, el mes en curso */
+  Movements: { end?: string } | undefined;
   /** Sin end, el mes del hogar de hoy */
   Closing: { end?: string } | undefined;
   FinanceSettings: undefined;

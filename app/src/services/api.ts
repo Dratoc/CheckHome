@@ -7,6 +7,7 @@ import type {
   ShoppingItem,
   CardStatementDetail,
   MethodMovements,
+  MonthMovements,
   FinanceSettings,
   MonthClosing,
   PaymentMethod,
@@ -216,8 +217,14 @@ export function payObligation(obligationId: number, _userId?: number, paymentMet
   return post(`/obligations/${obligationId}/pay`, paymentMethodId === undefined ? {} : { paymentMethodId });
 }
 
-export function listMovements(householdId: number, _userId?: number): Promise<Movement[]> {
-  return get(`/households/${householdId}/movements`);
+/** Movimientos de los últimos 3 meses; con limit, solo los más nuevos. */
+export function listMovements(householdId: number, _userId?: number, limit?: number): Promise<Movement[]> {
+  return get(`/households/${householdId}/movements${limit ? `?limit=${limit}` : ''}`);
+}
+
+/** Historial completo de un mes del hogar. Sin end, el mes en curso. */
+export function getMonthMovements(householdId: number, end?: string): Promise<MonthMovements> {
+  return get(`/households/${householdId}/movements/month${end ? `?end=${end}` : ''}`);
 }
 
 export function listIncomeSources(householdId: number, _userId?: number): Promise<IncomeSource[]> {

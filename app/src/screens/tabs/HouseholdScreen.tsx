@@ -92,15 +92,18 @@ export function HouseholdScreen({ navigation }: TabScreenProps<'Household'>) {
         </QueryView>
       </Card>
 
-      <SectionHeader title="Mascotas y autos" />
+      <SectionHeader title="Mascotas" />
       <Card padding="md">
         <ListItem
-          title="Mascotas"
+          title="Nuestras mascotas"
           subtitle="Comida, paseos, vacunas y antiparasitario"
           leading={<IconCircle name="paw-outline" tone="points" />}
           onPress={() => navigation.navigate('Pets')}
-          divider
         />
+      </Card>
+
+      <SectionHeader title="Vehículos" />
+      <Card padding="md">
         <ListItem
           title="Vehículos"
           subtitle="Papeles, mantención y rutinas del auto"

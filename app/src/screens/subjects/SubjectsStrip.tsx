@@ -9,19 +9,20 @@ import { PetAvatar, RoutinePill, keyDateBadge, urgentKeyDate } from './subjectUi
 type Toggle = { isChecked: (r: RoutineWithCheck) => boolean; toggle: (r: RoutineWithCheck) => void };
 
 type SubjectsStripProps = {
-  pets: PetView[];
-  vehicles: VehicleView[];
+  pets?: PetView[];
+  vehicles?: VehicleView[];
   routines: RoutineWithCheck[];
   toggle: Toggle;
-  onOpenPet: (p: PetView) => void;
-  onOpenVehicle: (v: VehicleView) => void;
+  onOpenPet?: (p: PetView) => void;
+  onOpenVehicle?: (v: VehicleView) => void;
 };
 
 /**
- * Inicio: una tarjeta por mascota (y por vehículo) con su estado de hoy. Las rutinas de hoy se marcan con un toque
+ * Inicio: una tarjeta por mascota o por vehículo con su estado de hoy. Las rutinas de hoy se marcan con un toque
  * desde aquí mismo, y abajo aparece lo que viene pronto (vacuna, antiparasitario, revisión técnica).
+ * Mascotas y autos van en franjas separadas: los datos son parecidos, pero una mascota es de la familia.
  */
-export function SubjectsStrip({ pets, vehicles, routines, toggle, onOpenPet, onOpenVehicle }: SubjectsStripProps) {
+export function SubjectsStrip({ pets = [], vehicles = [], routines, toggle, onOpenPet, onOpenVehicle }: SubjectsStripProps) {
   const t = useTheme();
   const dueFor = (match: (r: RoutineWithCheck) => boolean) => routines.filter((r) => r.status === 'active' && r.dueToday && match(r));
 
@@ -46,7 +47,7 @@ export function SubjectsStrip({ pets, vehicles, routines, toggle, onOpenPet, onO
             due={due}
             toggle={toggle}
             alert={urgent && b ? { label: `${urgent.title} · ${b.label}`, tone: b.tone } : undefined}
-            onOpen={() => onOpenPet(p)}
+            onOpen={() => onOpenPet?.(p)}
           />
         );
       })}
@@ -74,7 +75,7 @@ export function SubjectsStrip({ pets, vehicles, routines, toggle, onOpenPet, onO
             due={due}
             toggle={toggle}
             alert={alert}
-            onOpen={() => onOpenVehicle(v)}
+            onOpen={() => onOpenVehicle?.(v)}
           />
         );
       })}
