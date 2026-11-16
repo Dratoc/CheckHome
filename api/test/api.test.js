@@ -105,6 +105,12 @@ test('flujo completo de dos personas en un hogar', { skip: !cs && 'sin TEST_SQL_
 
   const mov = await call('GET', `/households/${hid}/movements`, null, tb);
   assert.deepEqual(mov.body.map((m) => m.kind).sort(), ['expense', 'payment', 'payment']);
+  assert.equal((await call('GET', `/households/${hid}/movements?limit=1`, null, tb)).body.length, 1, 'la lista corta de Cuentas');
+  const month = (await call('GET', `/households/${hid}/movements/month`, null, tb)).body;
+  assert.equal(month.isCurrent, true);
+  assert.deepEqual(month.rows.map((m) => m.kind).sort(), ['expense', 'payment', 'payment'], 'el historial del mes trae lo mismo');
+  assert.equal(month.totals.expense, 12500);
+  assert.equal((await call('GET', `/households/${hid}/movements/month?end=${month.prevEnd}`, null, tb)).body.rows.length, 0);
 
   const r = await call('POST', `/households/${hid}/routines`, { name: 'Loza', frequency: 'daily', points: 2 }, ta);
   assert.equal(r.status, 201);

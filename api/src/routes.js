@@ -546,50 +546,86 @@ router.get(
   }),
 );
 
+/**
+ * Movimientos del hogar (ingresos visibles, gastos y pagos de cuentas) entre dos fechas, del más nuevo al más viejo.
+ * Sin "to", hasta hoy en adelante (incluye lo anotado con fecha futura).
+ */
+async function householdMovements(hid, userId, from, to) {
+  const p = { h: hid, u: userId, from: date(from), to: date(to ?? '9999-12-31') };
+  const firstName = (n) => String(n).split(' ')[0];
+  const incomes = await query(
+    `SELECT i.id, i.amount, i.received_on, i.is_private, s.name FROM dbo.incomes i JOIN dbo.income_sources s ON s.id = i.source_id
+      WHERE i.household_id = @h AND ${VISIBLE_INCOME} AND i.received_on >= @from AND i.received_on <= @to`,
+    p,
+  );
+  const expenses = await query(
+    `SELECT e.id, e.amount, e.spent_on, e.description, c.name AS category, u.display_name, pm.name AS method_name, pu.display_name AS personal_name
+       FROM dbo.expenses e JOIN dbo.categories c ON c.id = e.category_id JOIN dbo.users u ON u.id = e.user_id
+       LEFT JOIN dbo.payment_methods pm ON pm.id = e.payment_method_id LEFT JOIN dbo.users pu ON pu.id = e.personal_user_id
+      WHERE e.household_id = @h AND e.spent_on >= @from AND e.spent_on <= @to`,
+    p,
+  );
+  const payments = await query(
+    `SELECT p.id, p.obligation_id, p.amount_clp, p.paid_on, o.name, u.display_name, pm.name AS method_name
+       FROM dbo.obligation_payments p JOIN dbo.obligations o ON o.id = p.obligation_id JOIN dbo.users u ON u.id = p.user_id
+       LEFT JOIN dbo.payment_methods pm ON pm.id = p.payment_method_id
+      WHERE o.household_id = @h AND p.paid_on >= @from AND p.paid_on <= @to`,
+    p,
+  );
+  const rows = [
+    ...incomes.map((r) => {
+      const d = fromSql(r.received_on);
+      return { key: `i${r.id}`, id: r.id, kind: 'income', title: r.name, subtitle: `${formatShortDate(d)} · ${r.is_private ? 'Privado' : 'Compartido'}`, amount: Number(r.amount), date: d };
+    }),
+    ...expenses.map((r) => {
+      const d = fromSql(r.spent_on);
+      const parts = [formatShortDate(d), r.category, r.method_name ?? firstName(r.display_name), r.personal_name ? `Personal de ${firstName(r.personal_name)}` : null];
+      return { key: `e${r.id}`, id: r.id, kind: 'expense', title: r.description || r.category, subtitle: parts.filter(Boolean).join(' · '), amount: Number(r.amount), date: d };
+    }),
+    ...payments.map((r) => {
+      const d = fromSql(r.paid_on);
+      return { key: `p${r.id}`, id: r.id, obligationId: r.obligation_id, kind: 'payment', title: r.name, subtitle: `${formatShortDate(d)} · Pago de cuenta · ${r.method_name ?? firstName(r.display_name)}`, amount: Number(r.amount_clp), date: d };
+    }),
+  ];
+  rows.sort((a, b) => b.date.localeCompare(a.date) || b.key.localeCompare(a.key));
+  return rows;
+}
+
+/** Lo último de los 3 meses recientes. ?limit=N devuelve solo los N más nuevos (la lista corta de Cuentas). */
 router.get(
   '/households/:id/movements',
   h(async (req, res) => {
     const hid = idParam(req);
     await requireMember(hid, req.userId);
-    // Últimos 3 meses: suficiente para la lista y liviano para el plan gratis.
-    const p = { h: hid, u: req.userId, from: date(addMonths(monthStart(today()), -2)) };
-    const firstName = (n) => String(n).split(' ')[0];
-    const incomes = await query(
-      `SELECT i.id, i.amount, i.received_on, i.is_private, s.name FROM dbo.incomes i JOIN dbo.income_sources s ON s.id = i.source_id
-        WHERE i.household_id = @h AND ${VISIBLE_INCOME} AND i.received_on >= @from`,
-      p,
-    );
-    const expenses = await query(
-      `SELECT e.id, e.amount, e.spent_on, e.description, c.name AS category, u.display_name, pm.name AS method_name, pu.display_name AS personal_name
-         FROM dbo.expenses e JOIN dbo.categories c ON c.id = e.category_id JOIN dbo.users u ON u.id = e.user_id
-         LEFT JOIN dbo.payment_methods pm ON pm.id = e.payment_method_id LEFT JOIN dbo.users pu ON pu.id = e.personal_user_id
-        WHERE e.household_id = @h AND e.spent_on >= @from`,
-      p,
-    );
-    const payments = await query(
-      `SELECT p.id, p.obligation_id, p.amount_clp, p.paid_on, o.name, u.display_name, pm.name AS method_name
-         FROM dbo.obligation_payments p JOIN dbo.obligations o ON o.id = p.obligation_id JOIN dbo.users u ON u.id = p.user_id
-         LEFT JOIN dbo.payment_methods pm ON pm.id = p.payment_method_id
-        WHERE o.household_id = @h AND p.paid_on >= @from`,
-      p,
-    );
-    const rows = [
-      ...incomes.map((r) => {
-        const d = fromSql(r.received_on);
-        return { key: `i${r.id}`, id: r.id, kind: 'income', title: r.name, subtitle: `${formatShortDate(d)} · ${r.is_private ? 'Privado' : 'Compartido'}`, amount: Number(r.amount), date: d };
-      }),
-      ...expenses.map((r) => {
-        const d = fromSql(r.spent_on);
-        const parts = [formatShortDate(d), r.category, r.method_name ?? firstName(r.display_name), r.personal_name ? `Personal de ${firstName(r.personal_name)}` : null];
-        return { key: `e${r.id}`, id: r.id, kind: 'expense', title: r.description || r.category, subtitle: parts.filter(Boolean).join(' · '), amount: Number(r.amount), date: d };
-      }),
-      ...payments.map((r) => {
-        const d = fromSql(r.paid_on);
-        return { key: `p${r.id}`, id: r.id, obligationId: r.obligation_id, kind: 'payment', title: r.name, subtitle: `${formatShortDate(d)} · Pago de cuenta · ${r.method_name ?? firstName(r.display_name)}`, amount: Number(r.amount_clp), date: d };
-      }),
-    ];
-    rows.sort((a, b) => b.date.localeCompare(a.date) || b.key.localeCompare(a.key));
-    res.json(rows);
+    const rows = await householdMovements(hid, req.userId, addMonths(monthStart(today()), -2));
+    const limit = Number(req.query.limit);
+    res.json(Number.isInteger(limit) && limit > 0 ? rows.slice(0, limit) : rows);
+  }),
+);
+
+/**
+ * Historial completo, un mes del hogar a la vez (el mismo ciclo del cierre del mes). ?end=YYYY-MM-DD elige el mes;
+ * por defecto, el en curso. Trae los totales para el resumen de arriba y cómo ir al mes anterior o siguiente.
+ */
+router.get(
+  '/households/:id/movements/month',
+  h(async (req, res) => {
+    const hid = idParam(req);
+    await requireMember(hid, req.userId);
+    const cut = (await householdFinance(hid)).cycleCutDay ?? null;
+    const c = cycleOf(req.query.end ? isoDate(req.query.end, 'El mes') : today(), cut);
+    const rows = await householdMovements(hid, req.userId, c.start, c.end);
+    const sum = (kind) => rows.filter((r) => r.kind === kind).reduce((s, r) => s + r.amount, 0);
+    res.json({
+      start: c.start,
+      end: c.end,
+      label: cycleLabel(c),
+      isCurrent: c.start <= today() && today() <= c.end,
+      prevEnd: previousCycle(c, cut).end,
+      nextEnd: nextCycle(c, cut).end,
+      totals: { income: sum('income'), expense: sum('expense'), payment: sum('payment') },
+      rows,
+    });
   }),
 );
 

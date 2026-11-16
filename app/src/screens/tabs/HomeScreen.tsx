@@ -26,7 +26,7 @@ import { monthName, today } from '../../utils/dates';
 import { SubjectsStrip } from '../subjects/SubjectsStrip';
 import { obligationBadge, obligationIcon, obligationSubtitle } from './obligationUi';
 
-/** Inicio: balance del mes, mascotas y autos con su estado de hoy, próximos vencimientos y checklist de hoy. */
+/** Inicio: balance del mes, las mascotas con su estado de hoy, próximos vencimientos, los autos y checklist de hoy. */
 export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
   const t = useTheme();
   const { user, household } = useHousehold();
@@ -38,7 +38,6 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
   const vehicles = useQuery(() => api.listVehicles(household.id), [household.id]);
   const petList = pets.data ?? [];
   const vehicleList = vehicles.data ?? [];
-  const subjectsTitle = petList.length && vehicleList.length ? 'Mascotas y autos' : petList.length ? 'Mascotas' : 'Vehículos';
 
   const upcoming = (obligations.data ?? []).filter((o) => o.status !== 'ok').slice(0, 3);
   // Inicio muestra solo lo mío por hacer y el avance de la casa; la lista completa está en Tareas.
@@ -85,16 +84,14 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
         </QueryView>
       </Card>
 
-      {petList.length + vehicleList.length > 0 && (
+      {petList.length > 0 && (
         <>
-          <SectionHeader title={subjectsTitle} action={petList.length ? 'Ver mascotas' : 'Ver autos'} onAction={() => navigation.navigate(petList.length ? 'Pets' : 'Vehicles')} />
+          <SectionHeader title={petList.length === 1 ? 'Nuestra mascota' : 'Nuestras mascotas'} action="Ver mascotas" onAction={() => navigation.navigate('Pets')} />
           <SubjectsStrip
             pets={petList}
-            vehicles={vehicleList}
             routines={routines.data ?? []}
             toggle={toggle}
             onOpenPet={(p) => navigation.navigate('Pet', { petId: p.id, name: p.name })}
-            onOpenVehicle={() => navigation.navigate('Vehicles')}
           />
         </>
       )}
@@ -129,6 +126,13 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
           }
         </QueryView>
       </Card>
+
+      {vehicleList.length > 0 && (
+        <>
+          <SectionHeader title={vehicleList.length === 1 ? 'Auto' : 'Autos'} action="Ver autos" onAction={() => navigation.navigate('Vehicles')} />
+          <SubjectsStrip vehicles={vehicleList} routines={routines.data ?? []} toggle={toggle} onOpenVehicle={() => navigation.navigate('Vehicles')} />
+        </>
+      )}
 
       <SectionHeader title="Mis tareas de hoy" action="Tareas" onAction={() => navigation.navigate('Tasks')} />
       <Card tone="points">

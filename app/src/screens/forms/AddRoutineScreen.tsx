@@ -48,11 +48,12 @@ export function AddRoutineScreen({ navigation, route }: RootScreenProps<'AddRout
   const pet = pets.data?.find((p) => p.id === petId);
   // Hasta que la persona elija, la categoría se sugiere sola por el nombre. Si es de una mascota o auto, va ahí.
   const category: CategoryChoice = petId ? 'pets' : vehicleId ? 'vehicles' : (chosenCategory ?? suggestCategory(name) ?? 'none');
-  const subjectOptions = [
+  // Mascotas y autos en grupos separados: una mascota es de la familia, no va en la misma fila que el auto.
+  const petOptions = [
     { value: 'house', label: 'De la casa' },
     ...(pets.data ?? []).map((p) => ({ value: `p${p.id}`, label: `${speciesEmoji(p.species)} ${p.name}` })),
-    ...(vehicles.data ?? []).map((v) => ({ value: `v${v.id}`, label: `🚗 ${v.name}` })),
   ];
+  const vehicleOptions = (vehicles.data ?? []).map((v) => ({ value: `v${v.id}`, label: `🚗 ${v.name}` }));
 
   const submit = async () => {
     setSubmitted(true);
@@ -77,7 +78,15 @@ export function AddRoutineScreen({ navigation, route }: RootScreenProps<'AddRout
 
   return (
     <Screen edges={['bottom']}>
-      {subjectOptions.length > 1 && <ChoiceChips label="¿De quién es?" options={subjectOptions} value={subject} onChange={setSubject} />}
+      {petOptions.length > 1 && <ChoiceChips label={vehicleOptions.length ? '¿De la casa o de una mascota?' : '¿De quién es?'} options={petOptions} value={subject} onChange={setSubject} />}
+      {vehicleOptions.length > 0 && (
+        <ChoiceChips
+          label={petOptions.length > 1 ? 'O de un vehículo' : '¿De la casa o de un vehículo?'}
+          options={petOptions.length > 1 ? vehicleOptions : [petOptions[0], ...vehicleOptions]}
+          value={subject}
+          onChange={setSubject}
+        />
+      )}
       <TextField
         label="Nombre"
         value={name}

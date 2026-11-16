@@ -178,6 +178,18 @@ export type Movement = {
   date: string;
 };
 
+/** Todos los movimientos de un mes del hogar (mismo ciclo del cierre), con sus totales. */
+export type MonthMovements = {
+  start: string;
+  end: string;
+  label: string;
+  isCurrent: boolean;
+  prevEnd: string;
+  nextEnd: string;
+  totals: { income: number; expense: number; payment: number };
+  rows: Movement[];
+};
+
 /** Gasto visto por quien lo abre: si puede cambiarlo (lo anotó o es administrador). */
 export type ExpenseView = Expense & { canEdit: boolean };
 

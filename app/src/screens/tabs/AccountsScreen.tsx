@@ -6,6 +6,7 @@ import {
   Button,
   Card,
   EmptyState,
+  Fab,
   IconCircle,
   ListItem,
   ProgressBar,
@@ -22,23 +23,22 @@ import * as api from '../../services/api';
 import type { IncomeSource, Movement, ObligationView } from '../../services/types';
 import { useHousehold } from '../../state/SessionProvider';
 import { useTheme } from '../../theme';
+import { MovementRow, useOpenMovement } from '../money/movementUi';
 import { obligationBadge, obligationIcon, obligationSubtitle } from './obligationUi';
 
 type Section = 'movements' | 'obligations' | 'income';
 
-/** Cuentas: movimientos del hogar, cuentas por pagar y fuentes de ingreso. */
+/** Cuentas: los últimos movimientos del hogar (el historial completo, en Movimientos), cuentas por pagar y fuentes de ingreso. */
 export function AccountsScreen({ navigation }: TabScreenProps<'Accounts'>) {
   const [section, setSection] = useState<Section>('movements');
 
-  // Tocar un movimiento abre lo que lo originó: el gasto, el ingreso o la cuenta pagada.
-  const openMovement = (m: Movement) => {
-    if (m.kind === 'expense') navigation.navigate('AddExpense', { expenseId: m.id });
-    else if (m.kind === 'income') navigation.navigate('EditIncome', { incomeId: m.id });
-    else if (m.obligationId) navigation.navigate('ObligationDetail', { obligationId: m.obligationId, name: m.title });
-  };
+  const openMovement = useOpenMovement();
+  // El botón flotante sigue a la sección: gasto en Movimientos, cuenta en Por pagar. Ingresos ya tiene su botón.
+  const fab =
+    section === 'movements' ? <ExpenseFab /> : section === 'obligations' ? <Fab label="Cuenta" accessibilityLabel="Agregar cuenta por pagar" onPress={() => navigation.navigate('AddObligation')} /> : undefined;
 
   return (
-    <Screen edges={['top']} overlay={<ExpenseFab />}>
+    <Screen edges={['top']} overlay={fab}>
       <Text variant="title" accessibilityRole="header">
         Cuentas
       </Text>
@@ -51,7 +51,9 @@ export function AccountsScreen({ navigation }: TabScreenProps<'Accounts'>) {
           { value: 'income', label: 'Ingresos' },
         ]}
       />
-      {section === 'movements' && <Movements onAdd={() => navigation.navigate('AddExpense')} onOpen={openMovement} />}
+      {section === 'movements' && (
+        <Movements onAdd={() => navigation.navigate('AddExpense')} onOpen={openMovement} onSeeAll={() => navigation.navigate('Movements')} />
+      )}
       {section === 'obligations' && (
         <Obligations onAdd={() => navigation.navigate('AddObligation')} onOpen={(o) => navigation.navigate('ObligationDetail', { obligationId: o.id, name: o.name })} />
       )}
@@ -76,9 +78,13 @@ export function AccountsScreen({ navigation }: TabScreenProps<'Accounts'>) {
   );
 }
 
-function Movements({ onAdd, onOpen }: { onAdd: () => void; onOpen: (m: Movement) => void }) {
+/** Cuántos movimientos se ven en Cuentas: lo justo para ver lo último sin tapar las secciones de abajo. */
+const LATEST = 5;
+
+function Movements({ onAdd, onOpen, onSeeAll }: { onAdd: () => void; onOpen: (m: Movement) => void; onSeeAll: () => void }) {
   const { user, household } = useHousehold();
-  const query = useQuery(() => api.listMovements(household.id, user.id), [household.id, user.id]);
+  // Se pide uno más para saber si hay más que mostrar en "Ver todos".
+  const query = useQuery(() => api.listMovements(household.id, user.id, LATEST + 1), [household.id, user.id]);
   return (
     <Card padding="md">
       <QueryView
@@ -86,24 +92,17 @@ function Movements({ onAdd, onOpen }: { onAdd: () => void; onOpen: (m: Movement)
         isEmpty={(d) => d.length === 0}
         empty={<EmptyState title="Sin movimientos todavía" message="Anota el primer gasto del hogar." action="Agregar gasto" onAction={onAdd} />}
       >
-        {(rows) =>
-          rows.map((m, i) => (
-            <ListItem
-              key={m.key}
-              title={m.title}
-              subtitle={m.subtitle}
-              leading={
-                <IconCircle
-                  name={m.kind === 'income' ? 'arrow-down' : m.kind === 'payment' ? 'receipt-outline' : 'arrow-up'}
-                  tone={m.kind === 'income' ? 'primary' : 'neutral'}
-                />
-              }
-              trailing={<Amount value={m.amount} sign={m.kind === 'income' ? 'income' : 'expense'} />}
-              onPress={() => onOpen(m)}
-              divider={i < rows.length - 1}
-            />
-          ))
-        }
+        {(all) => {
+          const rows = all.slice(0, LATEST);
+          return (
+            <>
+              {rows.map((m, i) => (
+                <MovementRow key={m.key} m={m} onPress={() => onOpen(m)} divider={i < rows.length - 1} />
+              ))}
+              <Button label="Ver todos los movimientos" variant="ghost" block onPress={onSeeAll} />
+            </>
+          );
+        }}
       </QueryView>
     </Card>
   );
