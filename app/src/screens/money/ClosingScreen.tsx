@@ -4,10 +4,10 @@ import { Amount, Badge, Button, Card, IconCircle, ListItem, ProgressBar, QueryVi
 import { useMutation, useQuery } from '../../hooks/useQuery';
 import type { RootScreenProps } from '../../navigation/types';
 import * as api from '../../services/api';
-import type { ClosingMember, MemberSpend, MonthClosing, Transfer } from '../../services/types';
+import type { ClosingMember, MonthClosing, SpendGroup, Transfer } from '../../services/types';
 import { useHousehold } from '../../state/SessionProvider';
 import { useTheme } from '../../theme';
-import { SpendChart } from './SpendChart';
+import { SpendChart, groupLabel } from './SpendChart';
 import { confirmDanger } from '../../utils/confirm';
 import { formatShortDate } from '../../utils/dates';
 
@@ -82,16 +82,16 @@ export function ClosingScreen({ navigation, route }: RootScreenProps<'Closing'>)
 
             <SectionHeader title="Gráfico de gastos" />
             <Card padding="md">
-              <SpendChart rows={c.spendByMember} />
+              <SpendChart rows={c.spendByOwner} />
             </Card>
 
-            <SectionHeader title="Quién gastó con qué" />
+            <SectionHeader title="De quién es cada gasto" />
             <Card padding="md">
-              {c.spendByMember.map((m, i) => (
-                <SpendRows key={m.userId} m={m} last={i === c.spendByMember.length - 1} />
+              {c.spendByOwner.map((g, i) => (
+                <SpendRows key={g.key} g={g} last={i === c.spendByOwner.length - 1} />
               ))}
               <Text variant="caption" color="textMuted">
-                Gastos y cuentas que anotó cada uno en este mes, según el medio con que se pagaron.
+                Casa: gastos del hogar y cuentas, que se reparten según el % de cada uno. Personal: lo que cada uno paga por su cuenta.
               </Text>
             </Card>
 
@@ -200,17 +200,17 @@ function Settlement({ c, closing, reopening, onClose, onReopen }: { c: MonthClos
   );
 }
 
-function SpendRows({ m, last }: { m: MemberSpend; last: boolean }) {
+function SpendRows({ g, last }: { g: SpendGroup; last: boolean }) {
   const t = useTheme();
   return (
     <View style={{ gap: t.spacing.xs, paddingBottom: last ? 0 : t.spacing.sm }}>
-      <Row label={first(m.name)} value={m.total} strong />
-      {m.methods.length === 0 ? (
+      <Row label={groupLabel(g)} value={g.total} strong />
+      {g.methods.length === 0 ? (
         <Text variant="caption" color="textMuted">
-          No anotó gastos este mes.
+          Sin gastos este mes.
         </Text>
       ) : (
-        m.methods.map((x) => (
+        g.methods.map((x) => (
           <View key={x.methodId ?? 0} style={{ paddingLeft: t.spacing.md }}>
             <Row label={x.name} value={x.amount} muted={!x.kind} />
           </View>

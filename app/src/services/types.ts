@@ -395,6 +395,15 @@ export type MemberSpend = {
   methods: { methodId: number | null; name: string; kind: PaymentMethod['kind'] | null; amount: number }[];
 };
 
+/** Gastos agrupados por de quién son: key 'home' = la casa; si no, lo personal de userId */
+export type SpendGroup = {
+  key: string;
+  userId?: number;
+  name: string;
+  total: number;
+  methods: MemberSpend['methods'];
+};
+
 export type Transfer = { fromUserId: number; fromName: string; toUserId: number; toName: string; amount: number };
 
 export type MonthClosing = {
@@ -409,6 +418,8 @@ export type MonthClosing = {
   members: ClosingMember[];
   /** Lo que anotó cada uno en el ciclo, por medio de pago (methodId null = sin indicar) */
   spendByMember: MemberSpend[];
+  /** La casa (gastos del hogar y cuentas) y lo personal de cada uno, por medio de pago */
+  spendByOwner: SpendGroup[];
   cards: CardStatement[];
   transfers: Transfer[];
   closed?: { closedAt: string; closedBy: string; transfers: Transfer[] };
