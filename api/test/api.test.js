@@ -455,6 +455,10 @@ test('medios de pago, cuadratura de la tarjeta y cierre del mes', { skip: !cs &&
   assert.equal(mv.total, 50000);
   assert.equal(mv.charges.length, 1);
 
+  // De quién es cada gasto: la casa y lo personal de cada uno.
+  assert.deepEqual(c.spendByOwner.map((g) => [g.key === 'home' ? 'Casa' : g.userId, g.total]), [['Casa', 550000], [a.user.id, 50000], [b.user.id, 100000]]);
+  assert.deepEqual(c.spendByOwner[0].methods.map((x) => [x.name, x.amount]), [['Visa Hernán', 500000], ['Débito Cami', 50000]]);
+
   // Sin ?end, la tarjeta abre en el período en curso; payableEnd apunta al último estado ya cerrado.
   const now = (await call('GET', `/payment-methods/${credit.body.id}/statement`, null, ta)).body;
   assert.equal(now.isClosed, false);

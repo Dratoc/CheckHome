@@ -2298,14 +2298,28 @@ async function closingFor(hid, cycleEnd) {
   }
   for (const d of deposits) add(d.user_id, 'savings', Number(d.s));
 
-  // Lo que anotó cada uno, separado por medio de pago (gastos y cuentas pagadas, del hogar y personales).
+  // Gastos y cuentas por medio de pago, agrupados de dos formas: por quién los anotó (spent) y por de quién son
+  // (owned: 'home' = del hogar, o el id de la persona si es personal; las cuentas siempre son del hogar).
   const spent = {};
+  const owned = {};
+  const addTo = (bucket, key, r) => {
+    const byMethod = (bucket[key] ??= {});
+    const mk = r.payment_method_id ?? 0;
+    byMethod[mk] ??= { methodId: r.payment_method_id ?? null, name: r.method_name ?? 'Sin indicar', kind: r.method_kind ?? null, amount: 0 };
+    byMethod[mk].amount += Number(r.amount);
+  };
   for (const r of [...expenses, ...bills]) {
-    const byMethod = (spent[r.user_id] ??= {});
-    const key = r.payment_method_id ?? 0;
-    byMethod[key] ??= { methodId: r.payment_method_id ?? null, name: r.method_name ?? 'Sin indicar', kind: r.method_kind ?? null, amount: 0 };
-    byMethod[key].amount += Number(r.amount);
+    addTo(spent, r.user_id, r);
+    addTo(owned, r.personal_user_id ?? 'home', r);
   }
+  const methodsOf = (byMethod) =>
+    Object.values(byMethod ?? {})
+      .map((x) => ({ ...x, amount: Math.round(x.amount) }))
+      .sort((a, b) => b.amount - a.amount);
+  const group = (key, name, byMethod, userId) => {
+    const methods = methodsOf(byMethod);
+    return { key, ...(userId ? { userId } : {}), name, total: methods.reduce((s, x) => s + x.amount, 0), methods };
+  };
 
   // Cada tarjeta: el estado que corta dentro de este ciclo, lo cargado según la app y lo pagado para ese estado.
   const cards = [];
@@ -2354,11 +2368,10 @@ async function closingFor(hid, cycleEnd) {
     isFinal: result.isFinal,
     members: result.members.map((m) => ({ ...m, name: names[m.userId] })),
     spendByMember: fin.members.map((m) => {
-      const methods = Object.values(spent[m.userId] ?? {})
-        .map((x) => ({ ...x, amount: Math.round(x.amount) }))
-        .sort((a, b) => b.amount - a.amount);
-      return { userId: m.userId, name: m.name, total: methods.reduce((s, x) => s + x.amount, 0), methods };
+      const g = group(`u${m.userId}`, m.name, spent[m.userId], m.userId);
+      return { userId: m.userId, name: g.name, total: g.total, methods: g.methods };
     }),
+    spendByOwner: [group('home', 'Casa', owned.home), ...fin.members.map((m) => group(`u${m.userId}`, m.name, owned[m.userId], m.userId))],
     cards,
     transfers: result.transfers.map((x) => ({ ...x, fromName: names[x.fromUserId], toName: names[x.toUserId] })),
     closed: closed
