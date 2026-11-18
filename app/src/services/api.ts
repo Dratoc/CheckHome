@@ -275,6 +275,10 @@ export type ExpenseInput = {
   paymentMethodId: number | null;
   /** null = del hogar */
   personalUserId: number | null;
+  /** Reembolso: ingreso único que resta de los gastos (amount igual va en positivo) */
+  isRefund?: boolean;
+  /** Gasto que se reembolsa (null = ninguno) */
+  refundOfId?: number | null;
 };
 
 export function addExpense(householdId: number, _userId: number, input: ExpenseInput): Promise<Expense> {

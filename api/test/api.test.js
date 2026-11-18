@@ -576,3 +576,76 @@ test('categorías, mascotas y fechas clave', { skip: !cs && 'sin TEST_SQL_CONNEC
   assert.equal(left.find((r) => r.id === lavar.id).vehicleId, undefined);
   assert.equal((await call('GET', `/households/${hid}/pets`, null, ta)).body.length, 0);
 });
+
+test('reembolsos: ingreso único como gasto negativo', { skip: !cs && 'sin TEST_SQL_CONNECTION_STRING' }, async () => {
+  const sfx = 'r' + Date.now().toString(36);
+  const a = (await call('POST', '/auth/register', { email: `a${sfx}@x.cl`, username: `her${sfx}`, displayName: 'Hernán', password: 'secreta123' })).body;
+  const b = (await call('POST', '/auth/register', { email: `b${sfx}@x.cl`, username: `cami${sfx}`, displayName: 'Cami', password: 'secreta123' })).body;
+  const ta = a.token;
+  const tb = b.token;
+  const hh = (await call('POST', '/households', { name: 'Casa' }, ta)).body;
+  const hid = hh.id;
+  await call('POST', '/households/join', { code: hh.inviteCode }, tb);
+  const other = (await call('POST', '/households', { name: 'Otra' }, ta)).body.id;
+  const cats = (await call('GET', `/households/${hid}/categories`, null, ta)).body;
+  const otherCats = (await call('GET', `/households/${other}/categories`, null, ta)).body;
+  await call('PATCH', `/households/${hid}/finance-settings`, { cycleCutDay: null, savingsGoal: 0, shares: [{ userId: a.user.id, pct: 50 }, { userId: b.user.id, pct: 50 }] }, ta);
+  const debitA = (await call('POST', `/households/${hid}/payment-methods`, { kind: 'debit', name: 'Débito Hernán' }, ta)).body;
+  const debitB = (await call('POST', `/households/${hid}/payment-methods`, { kind: 'debit', name: 'Débito Cami' }, tb)).body;
+  const exp = (body, t) => call('POST', `/households/${hid}/expenses`, { categoryId: cats[0].id, ...body }, t);
+
+  // Julio: el psicólogo (personal de Hernán) y un gasto de la casa que Cami devolvió en parte.
+  const psico = (await exp({ amount: 100000, description: 'Psicólogo', spentOn: '2026-07-05', paymentMethodId: debitA.id, personalUserId: a.user.id }, ta)).body;
+  await exp({ amount: 40000, spentOn: '2026-07-06', paymentMethodId: debitB.id }, tb);
+  const back = await exp({ amount: 10000, isRefund: true, description: 'Devolución', spentOn: '2026-07-20', paymentMethodId: debitB.id }, tb);
+  assert.equal(back.status, 201, JSON.stringify(back.body));
+  assert.deepEqual([back.body.amount, back.body.isRefund], [10000, true], 'la app ve el monto en positivo');
+
+  // Agosto: el seguro devuelve 70.000 del psicólogo al débito de Hernán.
+  const seguro = await exp({ amount: 70000, refundOfId: psico.id, description: 'Reembolso seguro', spentOn: '2026-08-03', paymentMethodId: debitA.id, personalUserId: a.user.id }, ta);
+  assert.equal(seguro.status, 201, JSON.stringify(seguro.body));
+  assert.deepEqual([seguro.body.isRefund, seguro.body.refundOfId], [true, psico.id], 'vincularlo ya lo marca como reembolso');
+
+  // Validaciones.
+  assert.equal((await exp({ amount: 0, isRefund: true }, ta)).status, 400);
+  assert.equal((await exp({ amount: 5, refundOfId: seguro.body.id }, ta)).status, 400, 'no se reembolsa un reembolso');
+  const foreign = (await call('POST', `/households/${other}/expenses`, { amount: 5, categoryId: otherCats[0].id }, ta)).body;
+  assert.equal((await exp({ amount: 5, refundOfId: foreign.id }, ta)).status, 400, 'gasto de otro hogar');
+  assert.equal((await call('PATCH', `/expenses/${psico.id}`, { amount: 100000, categoryId: cats[0].id, isRefund: true }, ta)).status, 400, 'tiene reembolsos');
+
+  // Al abrirlos: el reembolso dice de qué gasto es y el gasto, cuánto le han devuelto.
+  const opened = (await call('GET', `/expenses/${seguro.body.id}`, null, tb)).body;
+  assert.deepEqual([opened.refundOf.id, opened.refundOf.title, opened.refundOf.amount], [psico.id, 'Psicólogo', 100000]);
+  assert.deepEqual((await call('GET', `/expenses/${psico.id}`, null, ta)).body.refunds, [{ id: seguro.body.id, amount: 70000, spentOn: '2026-08-03' }]);
+
+  // Editar desde una versión anterior de la app (sin isRefund) lo mantiene como reembolso.
+  const kept = (await call('PATCH', `/expenses/${back.body.id}`, { amount: 12000, categoryId: cats[0].id }, tb)).body;
+  assert.deepEqual([kept.amount, kept.isRefund], [12000, true]);
+  await call('PATCH', `/expenses/${back.body.id}`, { amount: 10000, categoryId: cats[0].id, isRefund: true }, tb);
+
+  // Movimientos: el reembolso va en negativo y resta en los gastos del mes.
+  const aug = (await call('GET', `/households/${hid}/movements/month?end=2026-08-15`, null, ta)).body;
+  assert.equal(aug.totals.expense, -70000);
+  assert.deepEqual([aug.rows[0].isRefund, aug.rows[0].amount], [true, -70000]);
+  assert.match(aug.rows[0].subtitle, /Reembolso/);
+  const mv = (await call('GET', `/payment-methods/${debitB.id}/movements?end=2026-07-15`, null, tb)).body;
+  assert.equal(mv.total, 30000);
+
+  // Cierre de julio: la casa gastó 30.000 netos (15.000 cada uno); Hernán solo puso su psicólogo.
+  let c = (await call('GET', `/households/${hid}/closing?end=2026-07-15`, null, ta)).body;
+  assert.deepEqual([c.totals.household, c.totals.personal], [30000, 100000]);
+  assert.deepEqual(c.transfers.map((t) => [t.fromName, t.toName, t.amount]), [['Hernán', 'Cami', 15000]]);
+  assert.equal(c.spendByOwner[0].total, 30000);
+
+  // Cierre de agosto: el reembolso le baja lo personal a Hernán y lo que aportó; no mueve plata entre ellos.
+  c = (await call('GET', `/households/${hid}/closing?end=2026-08-15`, null, ta)).body;
+  assert.equal(c.totals.personal, -70000);
+  assert.deepEqual(c.transfers, []);
+  const her = c.members.find((m) => m.userId === a.user.id);
+  assert.deepEqual([her.personal, her.paidExpenses, her.balance], [-70000, -70000, 0]);
+
+  // Borrar el gasto original deja el reembolso (la plata sí llegó), pero suelto.
+  assert.equal((await call('DELETE', `/expenses/${psico.id}`, null, ta)).status, 204);
+  const loose = (await call('GET', `/expenses/${seguro.body.id}`, null, ta)).body;
+  assert.deepEqual([loose.isRefund, loose.refundOfId, loose.refundOf], [true, undefined, undefined]);
+});

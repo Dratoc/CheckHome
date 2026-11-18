@@ -12,16 +12,17 @@ export function useOpenMovement() {
   };
 }
 
-/** Una fila de movimiento: flecha de entrada o salida, qué fue y el monto. */
+/** Una fila de movimiento: flecha de entrada o salida, qué fue y el monto. Un reembolso se ve como entrada. */
 export function MovementRow({ m, onPress, divider }: { m: Movement; onPress: () => void; divider?: boolean }) {
+  const comesIn = m.kind === 'income' || !!m.isRefund;
   return (
     <ListItem
       title={m.title}
       subtitle={m.subtitle}
       leading={
-        <IconCircle name={m.kind === 'income' ? 'arrow-down' : m.kind === 'payment' ? 'receipt-outline' : 'arrow-up'} tone={m.kind === 'income' ? 'primary' : 'neutral'} />
+        <IconCircle name={comesIn ? 'arrow-down' : m.kind === 'payment' ? 'receipt-outline' : 'arrow-up'} tone={comesIn ? 'primary' : 'neutral'} />
       }
-      trailing={<Amount value={m.amount} sign={m.kind === 'income' ? 'income' : 'expense'} />}
+      trailing={<Amount value={Math.abs(m.amount)} sign={comesIn ? 'income' : 'expense'} />}
       onPress={onPress}
       divider={divider}
     />

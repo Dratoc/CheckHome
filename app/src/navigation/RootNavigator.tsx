@@ -99,7 +99,7 @@ export function RootNavigator() {
         ) : (
           <Stack.Group>
             <Stack.Screen name="Main" component={MainTabs} options={{ headerShown: false }} />
-            <Stack.Screen name="AddExpense" component={AddExpenseScreen} options={({ route }) => ({ title: route.params?.expenseId ? 'Editar gasto' : 'Nuevo gasto', presentation: 'modal' })} />
+            <Stack.Screen name="AddExpense" component={AddExpenseScreen} options={({ route }) => ({ title: route.params?.expenseId ? 'Editar gasto' : route.params?.refundOf ? 'Nuevo reembolso' : 'Nuevo gasto', presentation: 'modal' })} />
             <Stack.Screen name="AddObligation" component={AddObligationScreen} options={({ route }) => ({ title: route.params?.obligationId ? 'Editar cuenta' : 'Nueva cuenta', presentation: 'modal' })} />
             <Stack.Screen name="ObligationDetail" component={ObligationDetailScreen} options={({ route }) => ({ title: route.params.name })} />
             <Stack.Screen name="AddIncomeSource" component={AddIncomeSourceScreen} options={({ route }) => ({ title: route.params?.source ? 'Editar fuente' : 'Nueva fuente de ingreso', presentation: 'modal' })} />
