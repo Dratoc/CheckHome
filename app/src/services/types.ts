@@ -67,6 +67,10 @@ export type Expense = {
   paymentMethodId?: number;
   /** Si es personal, de quién; sin dato = del hogar */
   personalUserId?: number;
+  /** Reembolso: plata que entró (seguro, devolución). amount va en positivo; en los totales resta. */
+  isRefund?: boolean;
+  /** Solo reembolsos: el gasto que reembolsa, si se vinculó */
+  refundOfId?: number;
 };
 
 export type ObligationKind = 'subscription' | 'utility' | 'mortgage' | 'loan' | 'vehicle_doc' | 'other';
@@ -172,6 +176,8 @@ export type Movement = {
   /** Solo pagos: la cuenta a la que pertenece */
   obligationId?: number;
   kind: 'income' | 'expense' | 'payment';
+  /** Solo gastos: es un reembolso y su amount viene en negativo */
+  isRefund?: boolean;
   title: string;
   subtitle: string;
   amount: number;
@@ -191,7 +197,13 @@ export type MonthMovements = {
 };
 
 /** Gasto visto por quien lo abre: si puede cambiarlo (lo anotó o es administrador). */
-export type ExpenseView = Expense & { canEdit: boolean };
+export type ExpenseView = Expense & {
+  canEdit: boolean;
+  /** Si es un reembolso vinculado: el gasto original */
+  refundOf?: { id: number; title: string; amount: number; spentOn: string };
+  /** Si es un gasto: los reembolsos que ya le llegaron */
+  refunds?: { id: number; amount: number; spentOn: string }[];
+};
 
 export type IncomeView = Income & { sourceName: string };
 

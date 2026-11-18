@@ -9,7 +9,7 @@ export function formatCLP(value: number) {
 
 type AmountProps = Omit<TextProps, 'children' | 'color'> & {
   value: number;
-  /** Ingresos en verde con "+", gastos en texto normal con "−" */
+  /** Ingresos en verde con "+", gastos en texto normal con "−". Sin signo, un monto negativo (reembolso) lleva "−". */
   sign?: 'income' | 'expense' | 'none';
   size?: 'list' | 'display';
 };
@@ -17,13 +17,13 @@ type AmountProps = Omit<TextProps, 'children' | 'color'> & {
 /** Monto en pesos chilenos con números de ancho fijo. */
 export function Amount({ value, sign = 'none', size = 'list', ...rest }: AmountProps) {
   const t = useTheme();
-  const prefix = sign === 'income' ? '+' : sign === 'expense' ? '−' : '';
+  const prefix = sign === 'income' ? '+' : sign === 'expense' || value < 0 ? '−' : '';
   return (
     <Text
       {...rest}
       variant={size === 'display' ? 'display' : 'amount'}
       color={sign === 'income' ? 'success' : 'text'}
-      accessibilityLabel={`${sign === 'expense' ? 'menos ' : ''}${formatCLP(Math.abs(value))}`}
+      accessibilityLabel={`${sign === 'expense' || (sign === 'none' && value < 0) ? 'menos ' : ''}${formatCLP(Math.abs(value))}`}
     >
       {prefix}
       {formatCLP(Math.abs(value)).replace(/\s/g, '')}

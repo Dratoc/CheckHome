@@ -62,3 +62,9 @@ Los gastos aceptan `paymentMethodId` y `personalUserId` (vacío = del hogar); la
 `/households/:id/finance-settings` (corte del ciclo, meta de ahorro, % fijos o por sueldos), `/households/:id/savings`
 y `DELETE /savings-deposits/:id`, `GET /households/:id/closing?end=` (cierre del ciclo) y `POST /households/:id/closings`
 / `DELETE /households/:id/closings/:end` para cerrar y reabrir. Las cuentas del cierre están en `src/closing.js`.
+
+Reembolsos (migración `0010`): un ingreso único (el seguro que devuelve parte del psicólogo, una devolución) se anota
+como gasto con `isRefund: true` o con `refundOfId` (el gasto que reembolsa, del mismo hogar). La app manda y recibe el
+monto en positivo con `isRefund`; en la base y en movimientos, estado de la tarjeta y cierre va en negativo, así resta
+solo en el mes en que llega. `GET /expenses/:id` trae `refundOf` (el gasto original) o `refunds` (lo que ya le
+devolvieron). Al borrar el gasto original, sus reembolsos quedan sueltos.

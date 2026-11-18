@@ -232,12 +232,12 @@ function MemberCard({ m }: { m: ClosingMember }) {
       </Text>
       <Row label="Su parte del hogar" value={m.expectedHousehold} />
       {m.expectedSavings > 0 && <Row label="Su parte del ahorro" value={m.expectedSavings} />}
-      {m.personal > 0 && <Row label="Sus gastos personales" value={m.personal} />}
+      {m.personal !== 0 && <Row label="Sus gastos personales" value={m.personal} />}
       <Row label="Total" value={m.expected} strong />
       <Text variant="label" color="textMuted">
         Puso
       </Text>
-      {m.paidExpenses > 0 && <Row label="Con débito o efectivo" value={m.paidExpenses} />}
+      {m.paidExpenses !== 0 && <Row label="Con débito o efectivo" hint={m.paidExpenses < 0 ? 'menos reembolsos recibidos' : undefined} value={m.paidExpenses} />}
       {m.paidCard > 0 && <Row label="Pagos de la tarjeta" value={m.paidCard} />}
       {m.paidSavings > 0 && <Row label="Depósitos al ahorro" value={m.paidSavings} />}
       {m.cardToPay > 0 && <Row label="Tarjeta por pagar (provisorio)" value={m.cardToPay} muted />}

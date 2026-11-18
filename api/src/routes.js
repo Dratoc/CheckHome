@@ -579,8 +579,10 @@ async function householdMovements(hid, userId, from, to) {
     }),
     ...expenses.map((r) => {
       const d = fromSql(r.spent_on);
-      const parts = [formatShortDate(d), r.category, r.method_name ?? firstName(r.display_name), r.personal_name ? `Personal de ${firstName(r.personal_name)}` : null];
-      return { key: `e${r.id}`, id: r.id, kind: 'expense', title: r.description || r.category, subtitle: parts.filter(Boolean).join(' · '), amount: Number(r.amount), date: d };
+      const isRefund = Number(r.amount) < 0;
+      const parts = [formatShortDate(d), isRefund ? `Reembolso · ${r.category}` : r.category, r.method_name ?? firstName(r.display_name), r.personal_name ? `Personal de ${firstName(r.personal_name)}` : null];
+      // Un reembolso viene con monto negativo: resta en los totales de gastos.
+      return { key: `e${r.id}`, id: r.id, kind: 'expense', ...(isRefund ? { isRefund } : {}), title: r.description || r.category, subtitle: parts.filter(Boolean).join(' · '), amount: Number(r.amount), date: d };
     }),
     ...payments.map((r) => {
       const d = fromSql(r.paid_on);
@@ -817,13 +819,35 @@ async function personalUserId(v, hid) {
   return id;
 }
 
+/**
+ * Reembolso: ingreso único que se guarda como gasto negativo (resta en todos los totales). Se pide con isRefund o
+ * con refundOfId (el gasto que reembolsa, del mismo hogar y que no sea a su vez un reembolso). La app siempre manda
+ * el monto en positivo.
+ */
+async function refundOfId(v, hid, selfId) {
+  if (v == null || v === '' || v === 0) return null;
+  const id = num(v, 'El gasto reembolsado', { min: 1, int: true });
+  const [r] = await query('SELECT amount FROM dbo.expenses WHERE id = @i AND household_id = @h', { i: id, h: hid });
+  if (!r || id === selfId || Number(r.amount) < 0) throw badRequest('El gasto reembolsado no es válido.');
+  return id;
+}
+
+/** Monto positivo de la app (o negativo, que también se entiende como reembolso) y si es reembolso. */
+function expenseAmount(body, wasRefund) {
+  const raw = Number(body.amount);
+  const amount = Math.abs(raw);
+  if (!(amount > 0) || amount > 1e10) throw badRequest('El monto debe ser mayor a cero.');
+  const isRefund = 'isRefund' in body ? Boolean(body.isRefund) || raw < 0 : raw < 0 || Boolean(wasRefund);
+  return { amount, isRefund };
+}
+
 router.post(
   '/households/:id/expenses',
   h(async (req, res) => {
     const hid = idParam(req);
     await requireMember(hid, req.userId);
-    const amount = Number(req.body.amount);
-    if (!(amount > 0) || amount > 1e10) throw badRequest('El monto debe ser mayor a cero.');
+    const ro = await refundOfId(req.body.refundOfId, hid);
+    const { amount, isRefund } = expenseAmount({ ...req.body, ...(ro ? { isRefund: true } : {}) });
     const categoryId = num(req.body.categoryId, 'La categoría', { min: 1, int: true });
     const [cat] = await query('SELECT 1 AS x FROM dbo.categories WHERE id = @c AND household_id = @h', { c: categoryId, h: hid });
     if (!cat) throw badRequest('La categoría no es válida.');
@@ -832,9 +856,9 @@ router.post(
     const pm = await paymentMethodId(req.body.paymentMethodId, hid);
     const pu = await personalUserId(req.body.personalUserId, hid);
     const [row] = await query(
-      `INSERT INTO dbo.expenses (household_id, user_id, category_id, amount, description, spent_on, payment_method_id, personal_user_id)
-       OUTPUT INSERTED.* VALUES (@h, @u, @c, @a, @d, @s, @pm, @pu)`,
-      { h: hid, u: req.userId, c: categoryId, a: amount, d: description, s: date(spentOn), pm, pu },
+      `INSERT INTO dbo.expenses (household_id, user_id, category_id, amount, description, spent_on, payment_method_id, personal_user_id, refund_of_id)
+       OUTPUT INSERTED.* VALUES (@h, @u, @c, @a, @d, @s, @pm, @pu, @ro)`,
+      { h: hid, u: req.userId, c: categoryId, a: isRefund ? -amount : amount, d: description, s: date(spentOn), pm, pu, ro },
     );
     res.status(201).json(expenseRow(row, true));
   }),
@@ -849,24 +873,41 @@ async function editableExpense(req) {
   return { e, canEdit: e.user_id === req.userId || m.role === 'admin' };
 }
 
+/** amount va siempre en positivo; isRefund dice si en realidad entró plata (en la base está en negativo). */
 const expenseRow = (r, canEdit) => ({
   id: r.id,
   householdId: r.household_id,
   userId: r.user_id,
   categoryId: r.category_id,
-  amount: Number(r.amount),
+  amount: Math.abs(Number(r.amount)),
+  isRefund: Number(r.amount) < 0,
   description: r.description ?? '',
   spentOn: fromSql(r.spent_on),
   paymentMethodId: r.payment_method_id ?? undefined,
   personalUserId: r.personal_user_id ?? undefined,
+  refundOfId: r.refund_of_id ?? undefined,
   canEdit,
 });
+
+/** Al abrir un gasto: de qué gasto es el reembolso, o cuánto le han devuelto y en qué reembolsos. */
+async function expenseLinks(e) {
+  if (e.refund_of_id) {
+    const [o] = await query(
+      'SELECT e.id, e.amount, e.spent_on, e.description, c.name AS category FROM dbo.expenses e JOIN dbo.categories c ON c.id = e.category_id WHERE e.id = @i',
+      { i: e.refund_of_id },
+    );
+    return o ? { refundOf: { id: o.id, title: o.description || o.category, amount: Number(o.amount), spentOn: fromSql(o.spent_on) } } : {};
+  }
+  if (Number(e.amount) < 0) return {};
+  const rows = await query('SELECT id, amount, spent_on FROM dbo.expenses WHERE refund_of_id = @i ORDER BY spent_on, id', { i: e.id });
+  return rows.length ? { refunds: rows.map((r) => ({ id: r.id, amount: -Number(r.amount), spentOn: fromSql(r.spent_on) })) } : {};
+}
 
 router.get(
   '/expenses/:id',
   h(async (req, res) => {
     const { e, canEdit } = await editableExpense(req);
-    res.json(expenseRow(e, canEdit));
+    res.json({ ...expenseRow(e, canEdit), ...(await expenseLinks(e)) });
   }),
 );
 
@@ -875,8 +916,13 @@ router.patch(
   h(async (req, res) => {
     const { e, canEdit } = await editableExpense(req);
     if (!canEdit) throw forbidden('Solo quien anotó el gasto o un administrador puede cambiarlo.');
-    const amount = Number(req.body.amount);
-    if (!(amount > 0) || amount > 1e10) throw badRequest('El monto debe ser mayor a cero.');
+    // Sin isRefund ni refundOfId (versión anterior de la app) se mantiene lo que era.
+    const ro = 'refundOfId' in req.body ? await refundOfId(req.body.refundOfId, e.household_id, e.id) : e.refund_of_id;
+    const { amount, isRefund } = expenseAmount({ ...req.body, ...(ro ? { isRefund: true } : {}) }, Number(e.amount) < 0);
+    if (isRefund && Number(e.amount) > 0) {
+      const [linked] = await query('SELECT TOP 1 1 AS x FROM dbo.expenses WHERE refund_of_id = @e', { e: e.id });
+      if (linked) throw badRequest('Este gasto tiene reembolsos anotados: no se puede convertir en reembolso.');
+    }
     const categoryId = num(req.body.categoryId, 'La categoría', { min: 1, int: true });
     const [cat] = await query('SELECT 1 AS x FROM dbo.categories WHERE id = @c AND household_id = @h', { c: categoryId, h: e.household_id });
     if (!cat) throw badRequest('La categoría no es válida.');
@@ -886,8 +932,8 @@ router.patch(
     const pm = 'paymentMethodId' in req.body ? await paymentMethodId(req.body.paymentMethodId, e.household_id, e.payment_method_id) : e.payment_method_id;
     const pu = 'personalUserId' in req.body ? await personalUserId(req.body.personalUserId, e.household_id) : e.personal_user_id;
     const [row] = await query(
-      'UPDATE dbo.expenses SET amount = @a, category_id = @c, description = @d, spent_on = @s, payment_method_id = @pm, personal_user_id = @pu OUTPUT INSERTED.* WHERE id = @e',
-      { e: e.id, a: amount, c: categoryId, d: description, s: date(spentOn), pm, pu },
+      'UPDATE dbo.expenses SET amount = @a, category_id = @c, description = @d, spent_on = @s, payment_method_id = @pm, personal_user_id = @pu, refund_of_id = @ro OUTPUT INSERTED.* WHERE id = @e',
+      { e: e.id, a: isRefund ? -amount : amount, c: categoryId, d: description, s: date(spentOn), pm, pu, ro: isRefund ? ro : null },
     );
     res.json(expenseRow(row, true));
   }),
@@ -898,7 +944,11 @@ router.delete(
   h(async (req, res) => {
     const { e, canEdit } = await editableExpense(req);
     if (!canEdit) throw forbidden('Solo quien anotó el gasto o un administrador puede borrarlo.');
-    await query('DELETE FROM dbo.expenses WHERE id = @e', { e: e.id });
+    // Sus reembolsos se quedan (la plata sí llegó), pero sueltos.
+    await transaction(async (tx) => {
+      await query('UPDATE dbo.expenses SET refund_of_id = NULL WHERE refund_of_id = @e', { e: e.id }, tx);
+      await query('DELETE FROM dbo.expenses WHERE id = @e', { e: e.id }, tx);
+    });
     res.status(204).end();
   }),
 );
@@ -2046,8 +2096,9 @@ async function cardCharges(methodId, st) {
       key: `e${r.id}`,
       id: r.id,
       kind: 'expense',
+      ...(Number(r.amount) < 0 ? { isRefund: true } : {}),
       title: r.description || r.category,
-      subtitle: r.personal_name ? `${r.category} · Personal de ${String(r.personal_name).split(' ')[0]}` : r.category,
+      subtitle: [Number(r.amount) < 0 ? 'Reembolso' : null, r.category, r.personal_name ? `Personal de ${String(r.personal_name).split(' ')[0]}` : null].filter(Boolean).join(' · '),
       amount: Number(r.amount),
       date: fromSql(r.spent_on),
     })),
@@ -2319,6 +2370,8 @@ async function closingFor(hid, cycleEnd) {
   const personal = {};
   let household = 0;
   let byCredit = 0;
+  // Un reembolso viene en negativo: resta del gasto del hogar (o de lo personal de su dueño) y del aporte de quien
+  // recibió la plata (dueño del débito o efectivo); si llegó a la tarjeta, rebaja lo que hay que pagarle.
   for (const e of expenses) {
     const a = Number(e.amount);
     if (e.personal_user_id) personal[e.personal_user_id] = (personal[e.personal_user_id] ?? 0) + a;

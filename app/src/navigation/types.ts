@@ -22,7 +22,8 @@ export type RootStackParamList = {
   // App
   Main: NavigatorScreenParams<TabParamList>;
   /** Con expenseId, edita ese gasto */
-  AddExpense: { expenseId?: number } | undefined;
+  /** refundOf: abre el formulario como reembolso de ese gasto */
+  AddExpense: { expenseId?: number; refundOf?: number } | undefined;
   /** Con obligationId, edita esa cuenta; kind, vehicleId y propertyId prellenan una nueva */
   AddObligation: { obligationId?: number; kind?: ObligationKind; vehicleId?: number; propertyId?: number } | undefined;
   ObligationDetail: { obligationId: number; name: string };

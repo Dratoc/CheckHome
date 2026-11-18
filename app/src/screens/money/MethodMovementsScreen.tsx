@@ -53,7 +53,7 @@ export function MethodMovementsScreen({ navigation, route }: RootScreenProps<'Me
                     key={c.key}
                     title={c.title}
                     subtitle={`${formatShortDate(c.date)} · ${c.subtitle}`}
-                    leading={<IconCircle name={c.kind === 'payment' ? 'receipt-outline' : methodIcon[s.kind]} tone="neutral" />}
+                    leading={<IconCircle name={c.isRefund ? 'arrow-down' : c.kind === 'payment' ? 'receipt-outline' : methodIcon[s.kind]} tone={c.isRefund ? 'primary' : 'neutral'} />}
                     trailing={<Amount value={c.amount} />}
                     onPress={() =>
                       c.kind === 'expense'

@@ -50,6 +50,7 @@ export function SpendChart({ rows }: { rows: SpendGroup[] }) {
     }
   const byMethod = [...totals.values()].sort((a, b) => b.amount - a.amount);
   const maxMethod = Math.max(1, ...byMethod.map((x) => x.amount));
+  // Con reembolsos un total puede quedar en negativo: el monto se muestra con "−" y la barra queda vacía.
   const maxMember = Math.max(1, ...rows.map((m) => m.total));
 
   if (byMethod.length === 0) {
@@ -109,7 +110,7 @@ export function SpendChart({ rows }: { rows: SpendGroup[] }) {
 /** Barra horizontal: segmentos con 2px de separación y extremos redondeados; el largo es proporcional al máximo. */
 function Bar({ segments, max }: { segments: { key: string; color: string; amount: number }[]; max: number }) {
   const t = useTheme();
-  const total = segments.reduce((s, x) => s + x.amount, 0);
+  const total = Math.max(0, segments.reduce((s, x) => s + x.amount, 0));
   return (
     <View style={{ height: 12, borderRadius: 4, backgroundColor: t.colors.surfaceAlt, overflow: 'hidden' }}>
       <View style={{ width: `${(total / max) * 100}%`, height: '100%', flexDirection: 'row', gap: 2 }}>
