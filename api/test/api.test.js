@@ -26,7 +26,7 @@ before(async () => {
   // TEST_TARGET=functions corre la misma prueba a través del adaptador de Azure Functions.
   const entry = process.env.TEST_TARGET === 'functions' ? 'test/functions-host.js' : 'src/server.js';
   server = spawn('node', [entry], {
-    env: { ...process.env, SQL_CONNECTION_STRING: cs, JWT_SECRET: 'x'.repeat(40), PORT: String(PORT) },
+    env: { ...process.env, SQL_CONNECTION_STRING: cs, JWT_SECRET: 'x'.repeat(40), PORT: String(PORT), THROTTLE_DISABLED: '1' },
     stdio: 'inherit',
   });
   for (let i = 0; i < 50; i++) {
@@ -648,4 +648,61 @@ test('reembolsos: ingreso único como gasto negativo', { skip: !cs && 'sin TEST_
   assert.equal((await call('DELETE', `/expenses/${psico.id}`, null, ta)).status, 204);
   const loose = (await call('GET', `/expenses/${seguro.body.id}`, null, ta)).body;
   assert.deepEqual([loose.isRefund, loose.refundOfId, loose.refundOf], [true, undefined, undefined]);
+});
+
+test('borrar la cuenta: hogar propio completo y hogar compartido anonimizado', { skip: !cs && 'sin TEST_SQL_CONNECTION_STRING' }, async () => {
+  const sfx = Date.now().toString(36) + 'd';
+  const reg = async (n) => (await call('POST', '/auth/register', { email: `${n}${sfx}@x.cl`, username: `${n}${sfx}`, displayName: n, password: 'secreta123' })).body;
+  const a = await reg('ana');
+  const b = await reg('beto');
+  const ta = a.token;
+  const tb = b.token;
+
+  // Hogar solo de Ana, con un poco de todo.
+  const solo = (await call('POST', '/households', { name: 'Solo' }, ta)).body;
+  const s = solo.id;
+  const cats = (await call('GET', `/households/${s}/categories`, null, ta)).body;
+  const card = (await call('POST', `/households/${s}/payment-methods`, { kind: 'credit', name: 'Visa', cutDay: 19, dueDay: 5 }, ta)).body;
+  const exp = (await call('POST', `/households/${s}/expenses`, { amount: 5000, categoryId: cats[0].id, paymentMethodId: card.id }, ta)).body;
+  assert.equal((await call('POST', `/households/${s}/expenses`, { amount: 1000, categoryId: cats[0].id, refundOfId: exp.id }, ta)).status, 201);
+  const src = (await call('POST', `/households/${s}/income-sources`, { name: 'Sueldo', payDay: 1, expectedAmount: 100, isPrivate: true }, ta)).body;
+  await call('POST', `/income-sources/${src.id}/incomes`, { amount: 100 }, ta);
+  const ob = (await call('POST', `/households/${s}/obligations`, { kind: 'loan', name: 'Crédito', amount: 100, nextDueOn: '2026-01-05' }, ta)).body;
+  await call('POST', `/obligations/${ob.id}/pay`, {}, ta);
+  const car = (await call('POST', `/households/${s}/vehicles`, { name: 'Auto' }, ta)).body;
+  const pdf = Buffer.from('%PDF-1.4 prueba');
+  assert.equal((await call('POST', `/households/${s}/attachments`, { vehicleId: car.id, kind: 'other', title: 'Doc', fileName: 'a.pdf', contentType: 'application/pdf', data: pdf.toString('base64') }, ta)).status, 201);
+  const r = (await call('POST', `/households/${s}/routines`, { name: 'Loza', frequency: 'daily', points: 2 }, ta)).body;
+  await call('POST', `/routines/${r.id}/vote`, { points: 2 }, ta);
+  await call('POST', `/routines/${r.id}/toggle`, {}, ta);
+  await call('POST', `/routines/${r.id}/claim`, {}, ta);
+  await call('POST', `/households/${s}/backlog`, { title: 'Pintar' }, ta);
+  await call('POST', `/households/${s}/shopping`, { name: 'Leche' }, ta);
+  await call('POST', `/households/${s}/savings`, { amount: 100, depositedOn: '2026-10-10' }, ta);
+
+  // Hogar compartido con Beto: Ana es admin y anota un gasto y un ingreso privado.
+  const shared = (await call('POST', '/households', { name: 'Casa' }, ta)).body;
+  await call('POST', '/households/join', { code: shared.inviteCode }, tb);
+  const sc = (await call('GET', `/households/${shared.id}/categories`, null, ta)).body;
+  await call('POST', `/households/${shared.id}/expenses`, { amount: 7000, categoryId: sc[0].id, description: 'Pan' }, ta);
+  const priv = (await call('POST', `/households/${shared.id}/income-sources`, { name: 'Bono', payDay: 1, expectedAmount: 50, isPrivate: true }, ta)).body;
+  await call('POST', `/income-sources/${priv.id}/incomes`, { amount: 50 }, ta);
+
+  assert.equal((await call('POST', '/account/delete', { password: 'mala' }, ta)).status, 400);
+  assert.equal((await call('POST', '/account/delete', { password: 'secreta123' }, ta)).status, 204);
+
+  // Ya no entra, y el correo queda libre.
+  assert.equal((await call('POST', '/auth/login', { identifier: `ana${sfx}`, password: 'secreta123' })).status, 400);
+  assert.equal((await call('POST', '/account/delete', { password: 'secreta123' }, ta)).status, 404);
+  assert.equal((await call('POST', '/auth/register', { email: `ana${sfx}@x.cl`, username: `ana${sfx}`, displayName: 'Ana', password: 'secreta123' })).status, 201);
+
+  // Beto queda solo y como admin; el gasto de Ana sigue, a nombre de "Cuenta eliminada".
+  const members = (await call('GET', `/households/${shared.id}/members`, null, tb)).body;
+  assert.deepEqual(members.map((m) => [m.id, m.role]), [[b.user.id, 'admin']]);
+  const [hh] = (await call('GET', '/households', null, tb)).body;
+  assert.equal(hh.role, 'admin');
+  const mov = (await call('GET', `/households/${shared.id}/movements`, null, tb)).body;
+  const pan = mov.find((m) => m.title === 'Pan');
+  assert.match(pan.subtitle, /Cuenta$/, 'queda a nombre de "Cuenta eliminada" (la lista muestra el primer nombre)');
+  assert.ok(!JSON.stringify(mov).includes('Bono'), 'el ingreso privado se borró');
 });

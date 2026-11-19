@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Button, Screen, Text, TextField } from '../../components';
 import { useMutation } from '../../hooks/useQuery';
 import type { RootScreenProps } from '../../navigation/types';
+import { openPrivacyPolicy } from '../../services/api';
 import { useSession } from '../../state/SessionProvider';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -49,6 +50,13 @@ export function RegisterScreen({ navigation }: RootScreenProps<'Register'>) {
           {error}
         </Text>
       )}
+      <Text variant="caption" color="textMuted" align="center">
+        Al crear tu cuenta aceptas la{' '}
+        <Text variant="caption" color="primary" onPress={openPrivacyPolicy} accessibilityRole="link">
+          política de privacidad
+        </Text>
+        .
+      </Text>
       <Button label="Crear cuenta" size="lg" block loading={pending} onPress={submit} />
       <Button label="Ya tengo cuenta" variant="ghost" block onPress={() => navigation.replace('Login')} />
     </Screen>

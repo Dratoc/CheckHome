@@ -62,6 +62,7 @@ export function ChooseHouseholdScreen({ navigation }: RootScreenProps<'ChooseHou
       <Button label="Crear un hogar" block onPress={() => navigation.navigate('CreateHousehold')} />
       <Button label="Unirme con un código" variant="secondary" block onPress={() => navigation.navigate('JoinHousehold')} />
       <Button label="Cerrar sesión" variant="ghost" block onPress={logout} />
+      <Button label="Eliminar mi cuenta" variant="ghost" block onPress={() => navigation.navigate('DeleteAccount')} />
     </Screen>
   );
 }
