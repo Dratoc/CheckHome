@@ -19,6 +19,7 @@ export type RootStackParamList = {
   ChooseHousehold: undefined;
   CreateHousehold: undefined;
   JoinHousehold: undefined;
+  DeleteAccount: undefined;
   // App
   Main: NavigatorScreenParams<TabParamList>;
   /** Con expenseId, edita ese gasto */

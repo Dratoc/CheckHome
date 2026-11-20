@@ -9,6 +9,7 @@ import { getUf } from './uf.js';
 import { cardStatementIn, cycleLabel, cycleOf, dueDateOf, nextCycle, previousCycle, statementPaidOn } from './cycle.js';
 import { computeClosing, computeShares } from './closing.js';
 import { categoryInput } from './categories.js';
+import { createThrottle } from './throttle.js';
 
 export const router = Router();
 
@@ -44,6 +45,9 @@ function idParam(req, name = 'id') {
 }
 
 // ---------- Helpers ----------
+
+/** Marca de una cuenta borrada en password_hash: no es un hash de bcrypt, así que ninguna clave coincide. */
+const DELETED_HASH = 'deleted';
 
 const publicUser = (r) => ({ id: r.id, email: r.email, username: r.username, displayName: r.display_name });
 
@@ -111,6 +115,11 @@ router.get(
 
 // ---------- Acceso ----------
 
+// 5 claves malas por cuenta (o 20 desde una misma IP) en 15 minutos; 10 cuentas nuevas por IP en una hora.
+const loginByAccount = createThrottle({ max: 5, windowMs: 15 * 60_000, message: 'Demasiados intentos. Espera {min} min y vuelve a intentar.' });
+const loginByIp = createThrottle({ max: 20, windowMs: 15 * 60_000, message: 'Demasiados intentos. Espera {min} min y vuelve a intentar.' });
+const registerByIp = createThrottle({ max: 10, windowMs: 60 * 60_000, message: 'Se crearon muchas cuentas desde esta conexión. Espera {min} min.' });
+
 function session(userRow) {
   return { token: signToken(userRow.id), user: publicUser(userRow) };
 }
@@ -118,6 +127,7 @@ function session(userRow) {
 router.post(
   '/auth/register',
   h(async (req, res) => {
+    registerByIp.check(req.ip);
     const email = str(req.body.email, 'el correo', { max: 254 }).toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw badRequest('El correo no es válido.');
     const username = str(req.body.username, 'el nombre de usuario', { min: 3, max: 50 }).toLowerCase();
@@ -130,6 +140,7 @@ router.post(
     if (taken.some((r) => r.email === email)) throw conflict('Ese correo ya tiene una cuenta.');
     if (taken.length) throw conflict('Ese nombre de usuario ya está en uso.');
 
+    registerByIp.hit(req.ip);
     const hash = await bcrypt.hash(password, 10);
     const [row] = await query(
       `INSERT INTO dbo.users (email, username, display_name, password_hash)
@@ -146,13 +157,18 @@ router.post(
   h(async (req, res) => {
     const id = String(req.body.identifier ?? '').trim().toLowerCase();
     const password = String(req.body.password ?? '');
+    loginByIp.check(req.ip);
+    loginByAccount.check(id);
     const [row] = await query(
       'SELECT id, email, username, display_name, password_hash FROM dbo.users WHERE email = @i OR username = @i',
       { i: id },
     );
-    if (!row || !(await bcrypt.compare(password, row.password_hash))) {
+    if (!row || row.password_hash === DELETED_HASH || !(await bcrypt.compare(password, row.password_hash))) {
+      loginByIp.hit(req.ip);
+      loginByAccount.hit(id);
       throw badRequest('Correo o contraseña incorrectos.');
     }
+    loginByAccount.reset(id);
     res.json(session(row));
   }),
 );
@@ -188,6 +204,107 @@ router.get(
     const [row] = await query('SELECT id, email, username, display_name FROM dbo.users WHERE id = @u', { u: req.userId });
     if (!row) throw notFound('Tu cuenta ya no existe.');
     res.json(publicUser(row));
+  }),
+);
+
+// ---------- Borrar cuenta ----------
+
+/**
+ * Borra un hogar completo, de las tablas hijas a la raíz (las llaves foráneas no tienen ON DELETE CASCADE,
+ * salvo attachment_files). Solo se usa cuando quien borra su cuenta era el último miembro.
+ */
+async function deleteHouseholdData(hid, tx) {
+  const steps = [
+    'DELETE FROM dbo.attachments WHERE household_id = @h', // attachment_files cae en cascada
+    'DELETE FROM dbo.key_dates WHERE household_id = @h',
+    'DELETE FROM dbo.routine_checks WHERE routine_id IN (SELECT id FROM dbo.routines WHERE household_id = @h)',
+    'DELETE FROM dbo.routine_votes WHERE routine_id IN (SELECT id FROM dbo.routines WHERE household_id = @h)',
+    'DELETE FROM dbo.routine_claims WHERE routine_id IN (SELECT id FROM dbo.routines WHERE household_id = @h)',
+    'DELETE FROM dbo.routines WHERE household_id = @h',
+    'DELETE FROM dbo.task_votes WHERE task_id IN (SELECT id FROM dbo.backlog_tasks WHERE household_id = @h)',
+    'DELETE FROM dbo.backlog_tasks WHERE household_id = @h',
+    'DELETE FROM dbo.shopping_items WHERE household_id = @h',
+    'DELETE FROM dbo.month_closings WHERE household_id = @h',
+    'DELETE FROM dbo.savings_deposits WHERE household_id = @h',
+    'DELETE FROM dbo.card_payments WHERE payment_method_id IN (SELECT id FROM dbo.payment_methods WHERE household_id = @h)',
+    'DELETE FROM dbo.obligation_payments WHERE obligation_id IN (SELECT id FROM dbo.obligations WHERE household_id = @h)',
+    'UPDATE dbo.expenses SET refund_of_id = NULL WHERE household_id = @h AND refund_of_id IS NOT NULL',
+    'DELETE FROM dbo.expenses WHERE household_id = @h',
+    'DELETE FROM dbo.incomes WHERE household_id = @h',
+    'DELETE FROM dbo.obligations WHERE household_id = @h',
+    'DELETE FROM dbo.income_sources WHERE household_id = @h',
+    'DELETE FROM dbo.payment_methods WHERE household_id = @h',
+    'DELETE FROM dbo.pets WHERE household_id = @h',
+    'DELETE FROM dbo.vehicles WHERE household_id = @h',
+    'DELETE FROM dbo.properties WHERE household_id = @h',
+    'DELETE FROM dbo.categories WHERE household_id = @h',
+    'DELETE FROM dbo.household_members WHERE household_id = @h',
+    'DELETE FROM dbo.households WHERE id = @h',
+  ];
+  for (const text of steps) await query(text, { h: hid }, tx);
+}
+
+/**
+ * Borra la cuenta (requisito de Google Play). Pide la clave otra vez.
+ * - Hogares donde era el único miembro: se borran completos.
+ * - Hogares compartidos: sale del hogar, se borran sus ingresos privados y sus votos; lo que anotó para el hogar
+ *   (gastos, pagos, compras) queda a nombre de "Cuenta eliminada" para que las cuentas del resto no cambien.
+ *   Si era el único admin, el miembro más antiguo pasa a admin.
+ * - Correo, usuario, nombre y clave se reemplazan: el correo queda libre para una cuenta nueva.
+ */
+router.post(
+  '/account/delete',
+  h(async (req, res) => {
+    const password = typeof req.body.password === 'string' ? req.body.password : '';
+    const [user] = await query('SELECT password_hash FROM dbo.users WHERE id = @u', { u: req.userId });
+    if (!user || user.password_hash === DELETED_HASH) throw notFound('Tu cuenta ya no existe.');
+    if (!(await bcrypt.compare(password, user.password_hash))) throw badRequest('La clave no es correcta.');
+
+    await transaction(async (tx) => {
+      const u = { u: req.userId };
+      const homes = await query(
+        `SELECT m.household_id AS id, (SELECT COUNT(*) FROM dbo.household_members x WHERE x.household_id = m.household_id) AS members
+           FROM dbo.household_members m WHERE m.user_id = @u`,
+        u,
+        tx,
+      );
+      for (const hh of homes) if (hh.members === 1) await deleteHouseholdData(hh.id, tx);
+
+      // Hogares compartidos: lo privado y lo que solo tiene sentido con la persona presente.
+      await query('DELETE FROM dbo.incomes WHERE user_id = @u AND (is_private = 1 OR source_id IN (SELECT id FROM dbo.income_sources WHERE user_id = @u AND is_private = 1))', u, tx);
+      await query(
+        `DELETE FROM dbo.income_sources WHERE user_id = @u AND is_private = 1
+           AND NOT EXISTS (SELECT 1 FROM dbo.incomes i WHERE i.source_id = dbo.income_sources.id)`,
+        u,
+        tx,
+      );
+      await query('DELETE FROM dbo.routine_votes WHERE user_id = @u', u, tx);
+      await query('DELETE FROM dbo.routine_claims WHERE user_id = @u', u, tx);
+      await query('DELETE FROM dbo.task_votes WHERE user_id = @u', u, tx);
+      await query("UPDATE dbo.backlog_tasks SET taken_by = NULL, status = 'open' WHERE taken_by = @u AND status = 'taken'", u, tx);
+
+      const shared = homes.filter((hh) => hh.members > 1).map((hh) => hh.id);
+      await query('DELETE FROM dbo.household_members WHERE user_id = @u', u, tx);
+      for (const hid of shared) {
+        await query(
+          `IF NOT EXISTS (SELECT 1 FROM dbo.household_members WHERE household_id = @h AND role = 'admin')
+             UPDATE dbo.household_members SET role = 'admin'
+              WHERE household_id = @h AND user_id = (SELECT TOP 1 user_id FROM dbo.household_members WHERE household_id = @h ORDER BY joined_at)`,
+          { h: hid },
+          tx,
+        );
+      }
+
+      await query(
+        `UPDATE dbo.users
+            SET email = CONCAT('eliminada-', id, '@checkhome.invalid'), username = CONCAT('eliminada-', id),
+                display_name = 'Cuenta eliminada', password_hash = @d, email_verified_at = NULL, updated_at = SYSUTCDATETIME()
+          WHERE id = @u`,
+        { ...u, d: DELETED_HASH },
+        tx,
+      );
+    });
+    res.status(204).end();
   }),
 );
 

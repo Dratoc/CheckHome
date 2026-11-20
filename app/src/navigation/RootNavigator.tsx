@@ -9,6 +9,7 @@ import { LoginScreen } from '../screens/auth/LoginScreen';
 import { ChooseHouseholdScreen } from '../screens/household/ChooseHouseholdScreen';
 import { CreateHouseholdScreen } from '../screens/household/CreateHouseholdScreen';
 import { JoinHouseholdScreen } from '../screens/household/JoinHouseholdScreen';
+import { DeleteAccountScreen } from '../screens/auth/DeleteAccountScreen';
 import { AddExpenseScreen } from '../screens/AddExpenseScreen';
 import { DesignPreview } from '../screens/DesignPreview';
 import { AddIncomeScreen } from '../screens/forms/AddIncomeScreen';
@@ -130,6 +131,7 @@ export function RootNavigator() {
             <Stack.Screen name="DesignPreview" component={DesignPreview} options={{ title: 'Sistema de diseño' }} />
           </Stack.Group>
         )}
+        {user && <Stack.Screen name="DeleteAccount" component={DeleteAccountScreen} options={{ title: 'Eliminar mi cuenta', presentation: 'modal' }} />}
       </Stack.Navigator>
     </NavigationContainer>
   );

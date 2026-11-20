@@ -1,0 +1,100 @@
+# Genera el AAB firmado para subir a Google Play (prueba interna, cerrada o producción).
+# Solo a mano: pestaña Actions → "AAB para Google Play" → Run workflow.
+# Costo cero: runners estándar de GitHub Actions en repo público.
+#
+# Necesita 4 secretos del repo (Settings → Secrets and variables → Actions), creados con infra/android-upload-key.sh:
+#   ANDROID_UPLOAD_KEYSTORE_BASE64, ANDROID_UPLOAD_STORE_PASSWORD, ANDROID_UPLOAD_KEY_ALIAS, ANDROID_UPLOAD_KEY_PASSWORD
+# La clave nunca entra al repo: se escribe en el runner solo durante el build y se borra al final.
+# El versionCode es 100 + el número de ejecución, así cada AAB sube solo y nunca se repite.
+name: AAB para Google Play
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aab-play
+  cancel-in-progress: false
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: app
+    env:
+      EXPO_PUBLIC_API_URL: ${{ vars.API_URL || 'https://purple-coast-025bebe10.8.azurestaticapps.net/api' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Revisar que estén los secretos de la clave de subida
+        env:
+          KS: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          SP: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          KA: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          KP: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        run: |
+          missing=""
+          [ -n "$KS" ] || missing="$missing ANDROID_UPLOAD_KEYSTORE_BASE64"
+          [ -n "$SP" ] || missing="$missing ANDROID_UPLOAD_STORE_PASSWORD"
+          [ -n "$KA" ] || missing="$missing ANDROID_UPLOAD_KEY_ALIAS"
+          [ -n "$KP" ] || missing="$missing ANDROID_UPLOAD_KEY_PASSWORD"
+          if [ -n "$missing" ]; then echo "::error::Faltan secretos:$missing (ver infra/android-upload-key.sh)"; exit 1; fi
+          echo "ANDROID_VERSION_CODE=$((100 + ${{ github.run_number }}))" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Revisar tipos
+        run: npx tsc --noEmit
+
+      - name: Generar proyecto Android
+        run: npx expo prebuild --platform android --no-install
+        env:
+          CI: 1
+
+      - name: Compilar AAB firmado
+        working-directory: app/android
+        env:
+          KS: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          CHECKHOME_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          CHECKHOME_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          CHECKHOME_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        run: |
+          export CHECKHOME_UPLOAD_STORE_FILE="$RUNNER_TEMP/upload.jks"
+          echo "$KS" | base64 --decode > "$CHECKHOME_UPLOAD_STORE_FILE"
+          ./gradlew bundleRelease --no-daemon
+          rm -f "$CHECKHOME_UPLOAD_STORE_FILE"
+
+      - name: Comprobar que no quedó firmado con la clave de depuración
+        working-directory: app/android
+        run: |
+          AAB=app/build/outputs/bundle/release/app-release.aab
+          if keytool -printcert -jarfile "$AAB" | grep -q "CN=Android Debug"; then
+            echo "::error::El AAB quedó firmado con la clave de depuración"; exit 1
+          fi
+          keytool -printcert -jarfile "$AAB" | grep -E "Owner|SHA256" | head -2
+
+      - name: Subir AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkhome-play-${{ env.ANDROID_VERSION_CODE }}
+          path: app/android/app/build/outputs/bundle/release/app-release.aab
+          retention-days: 30
+          if-no-files-found: error

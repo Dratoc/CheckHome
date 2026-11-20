@@ -48,6 +48,13 @@ import type {
 
 export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? '').replace(/\/$/, '');
 
+/** Página pública de la política de privacidad, servida por la misma Static Web App que la API. */
+export function openPrivacyPolicy() {
+  const site = API_URL.replace(/\/api$/, '');
+  const base = site.startsWith('http') ? site : typeof window !== 'undefined' ? window.location.origin : '';
+  if (base) Linking.openURL(`${base}/privacidad`);
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -125,6 +132,11 @@ export function normalizeInviteCode(raw: string) {
 export type AuthResult = { token: string; user: User };
 
 export type RegisterInput = { email: string; username: string; displayName: string; password: string };
+
+/** Borra la cuenta para siempre (pide la clave otra vez). Ver POST /account/delete en la API. */
+export function deleteAccount(password: string): Promise<true> {
+  return post('/account/delete', { password }).then(() => true as const);
+}
 
 export function register(input: RegisterInput): Promise<AuthResult> {
   return post('/auth/register', input);

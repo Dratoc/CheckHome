@@ -127,6 +127,8 @@ export function HouseholdScreen({ navigation }: TabScreenProps<'Household'>) {
       <Button label="Cambiar de hogar" variant="secondary" block onPress={leaveCurrentHousehold} />
       <Button label="Ver sistema de diseño" variant="ghost" block onPress={() => navigation.navigate('DesignPreview')} />
       <Button label="Cerrar sesión" variant="ghost" block onPress={logout} />
+      <Button label="Política de privacidad" variant="ghost" block onPress={api.openPrivacyPolicy} />
+      <Button label="Eliminar mi cuenta" variant="ghost" block onPress={() => navigation.navigate('DeleteAccount')} />
       <Text variant="caption" color="textSubtle" align="center">
         Sesión de {user.email}
       </Text>
