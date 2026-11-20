@@ -78,7 +78,12 @@ jobs:
           CHECKHOME_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
         run: |
           export CHECKHOME_UPLOAD_STORE_FILE="$RUNNER_TEMP/upload.jks"
-          echo "$KS" | base64 --decode > "$CHECKHOME_UPLOAD_STORE_FILE"
+          # Al pegar en GitHub suelen colarse saltos de línea o espacios: se limpian antes de usarlos.
+          printf '%s' "$KS" | tr -d ' \r\n\t' | base64 --decode > "$CHECKHOME_UPLOAD_STORE_FILE"
+          trim() { printf '%s' "$1" | tr -d '\r\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'; }
+          export CHECKHOME_UPLOAD_STORE_PASSWORD="$(trim "$CHECKHOME_UPLOAD_STORE_PASSWORD")"
+          export CHECKHOME_UPLOAD_KEY_ALIAS="$(trim "$CHECKHOME_UPLOAD_KEY_ALIAS")"
+          export CHECKHOME_UPLOAD_KEY_PASSWORD="$(trim "$CHECKHOME_UPLOAD_KEY_PASSWORD")"
           ./gradlew bundleRelease --no-daemon
           rm -f "$CHECKHOME_UPLOAD_STORE_FILE"
 
