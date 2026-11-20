@@ -78,7 +78,18 @@ jobs:
           CHECKHOME_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
         run: |
           export CHECKHOME_UPLOAD_STORE_FILE="$RUNNER_TEMP/upload.jks"
-          echo "$KS" | base64 --decode > "$CHECKHOME_UPLOAD_STORE_FILE"
+          # Al pegar en GitHub suelen colarse saltos de línea o espacios: se limpian antes de usarlos.
+          CLEAN="$(printf '%s' "$KS" | tr -d ' \r\n\t')"
+          if ! printf '%s' "$CLEAN" | base64 --decode > "$CHECKHOME_UPLOAD_STORE_FILE" 2>/dev/null; then
+            # Sin mostrar el secreto: solo cuánto mide y si trae caracteres que no son base64.
+            BAD="$(printf '%s' "$CLEAN" | tr -d 'A-Za-z0-9+/=' | wc -c)"
+            echo "::error::ANDROID_UPLOAD_KEYSTORE_BASE64 no es base64 válido (${#CLEAN} caracteres, $BAD no válidos; se esperan ~3560 y 0). Vuelve a pegarlo desde checkhome-keys/pegar-en-github/."
+            exit 1
+          fi
+          trim() { printf '%s' "$1" | tr -d '\r\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'; }
+          export CHECKHOME_UPLOAD_STORE_PASSWORD="$(trim "$CHECKHOME_UPLOAD_STORE_PASSWORD")"
+          export CHECKHOME_UPLOAD_KEY_ALIAS="$(trim "$CHECKHOME_UPLOAD_KEY_ALIAS")"
+          export CHECKHOME_UPLOAD_KEY_PASSWORD="$(trim "$CHECKHOME_UPLOAD_KEY_PASSWORD")"
           ./gradlew bundleRelease --no-daemon
           rm -f "$CHECKHOME_UPLOAD_STORE_FILE"
 

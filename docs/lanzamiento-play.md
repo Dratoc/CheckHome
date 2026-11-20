@@ -14,8 +14,8 @@ consumo de la base cada semana**; si a mitad de mes va sobre el 50 %, se activa 
 | Borrar cuenta (app) | Hogar → Eliminar mi cuenta (`POST /api/account/delete`) |
 | Build para la tienda | Actions → "AAB para Google Play" (`.github/workflows/aab-play.yml`) |
 
-Antes de desplegar las páginas, reemplazar `CONTACTO_PENDIENTE` (correo público de soporte) y
-`NOMBRE_DESARROLLADOR` (el nombre que muestra la cuenta de Play) en `web/*.html`.
+Desarrollador en Play: **granadadevs**. Correo público de contacto: morenofonseca.hernan@gmail.com
+(es el que aparece en la ficha y en las páginas de `web/`).
 
 ## Paso a paso
 
